@@ -13,7 +13,10 @@ export const THEME = {
     BASE_SIZE: 150,
     ROTATION_SPEED: 12, 
     FLOAT_FREQ: 1.2,    
-    FLOAT_AMP: 15,      
+    FLOAT_AMP: 15,
+    SWAY_FREQ: 0.6,
+    SWAY_AMP_X: 20,
+    SWAY_AMP_SCALE: 0.05,
     MAG_PRIMARY: 0.03,  
     MAG_SECONDARY: 0.02 
   },
@@ -51,16 +54,71 @@ export const THEME = {
   }
 };
 
-// --- REQUESTED COLOR PALETTE ---
-export const COLOR_PAIRS = [
-  { name: 'Blue',       p: '#2E9AFE', s: '#0B3861' },
-  { name: 'Red-Orange', p: '#FF4500', s: '#8B2500' },
-  { name: 'Violet',     p: '#9400D3', s: '#4B0082' },
-  { name: 'Pink',       p: '#FF1493', s: '#8B0A50' },
-  { name: 'Yellow',     p: '#FFD700', s: '#8B7500' },
-  { name: 'White',      p: '#FFFFFF', s: '#696969' },
-];
+// --- CLASS DEFINITIONS ---
+export const CLASSES = {
+  firewall: {
+    id: 'firewall',
+    name: 'Firewall',
+    role: 'Tank',
+    color: '#2E9AFE', // Blue
+    hp: 120,
+    shapes: ['cube', 'octahedron'],
+    icon: 'shield',
+    ability: { name: 'Packet Filter', desc: 'High defense mitigation.' }
+  },
+  crash: {
+    id: 'crash',
+    name: 'Crash',
+    role: 'DPS',
+    color: '#FF4500', // Red-Orange
+    hp: 80,
+    shapes: ['tetrahedron', 'cube'],
+    icon: 'x',
+    ability: { name: 'Buffer Overflow', desc: 'High damage burst.' }
+  },
+  rootkit: {
+    id: 'rootkit',
+    name: 'Rootkit',
+    role: 'Rogue',
+    color: '#9400D3', // Violet
+    hp: 70,
+    shapes: ['dodecahedron', 'tetrahedron'],
+    icon: 'star',
+    ability: { name: 'Privilege Escalation', desc: 'Critical hit chance up.' }
+  },
+  zeroday: {
+    id: 'zeroday',
+    name: 'Zero Day',
+    role: 'Sniper',
+    color: '#FFD700', // Yellow
+    hp: 60,
+    shapes: ['octahedron', 'dodecahedron'],
+    icon: 'target',
+    ability: { name: 'Exploit', desc: 'Ignores defense.' }
+  },
+  av: {
+    id: 'av',
+    name: 'Antivirus',
+    role: 'Healer',
+    color: '#FFFFFF', // White
+    hp: 90,
+    shapes: ['cube', 'dodecahedron'],
+    icon: 'plus',
+    ability: { name: 'Quarantine', desc: 'Restores system integrity.' }
+  },
+  daemon: {
+    id: 'daemon',
+    name: 'Daemon',
+    role: 'Support',
+    color: '#FF1493', // Pink
+    hp: 100,
+    shapes: ['tetrahedron', 'octahedron'], // UPDATED: Was ['dodecahedron', 'octahedron']
+    icon: 'hourglass',
+    ability: { name: 'Background Process', desc: 'Passive buffs.' }
+  }
+};
 
+// --- UTILS ---
 const distance3D = (v1, v2) => {
   const dx = v1[0] - v2[0];
   const dy = v1[1] - v2[1];
@@ -111,72 +169,71 @@ export const SHAPES = {
   },
   dodecahedron: {
     vertices: [
-        // Cube Corners (0-7)
         [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
         [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1],
-        // YZ Plane Rect (8-11)
         [0, PHI, INV_PHI], [0, PHI, -INV_PHI], [0, -PHI, INV_PHI], [0, -PHI, -INV_PHI],
-        // XZ Plane Rect (12-15)
         [INV_PHI, 0, PHI], [INV_PHI, 0, -PHI], [-INV_PHI, 0, PHI], [-INV_PHI, 0, -PHI],
-        // XY Plane Rect (16-19)
         [PHI, INV_PHI, 0], [PHI, -INV_PHI, 0], [-PHI, INV_PHI, 0], [-PHI, -INV_PHI, 0]
     ],
     faces: [
-        [0, 16, 1, 9, 8],
-        [0, 8, 4, 14, 12],
-        [0, 12, 2, 17, 16],
-        [1, 9, 5, 13, 16],
-        [1, 16, 17, 3, 13],
-        [2, 12, 14, 6, 10],
-        [2, 10, 11, 3, 17],
-        [3, 11, 7, 15, 13],
-        [4, 8, 9, 5, 18],
-        [4, 18, 19, 6, 14],
-        [5, 18, 19, 7, 15], 
-        [6, 14, 4, 18, 19]  
+        [0, 16, 1, 9, 8], [0, 8, 4, 14, 12], [0, 12, 2, 17, 16],
+        [1, 9, 5, 13, 16], [1, 16, 17, 3, 13], [2, 12, 14, 6, 10],
+        [2, 10, 11, 3, 17], [3, 11, 7, 15, 13], [4, 8, 9, 5, 18],
+        [4, 18, 19, 6, 14], [5, 18, 19, 7, 15], [6, 14, 4, 18, 19]  
     ]
   }
 };
 
-// Normalize and center all shapes on load
 Object.keys(SHAPES).forEach(k => {
     SHAPES[k].vertices = centerVertices(normalizeVertices(SHAPES[k].vertices));
 });
 
-// --- SHAPE CONFIGURATION ---
-export const SHAPE_PAIRS = [
-    { p: 'cube', s: 'tetrahedron' },
-    { p: 'cube', s: 'octahedron' },
-    { p: 'cube', s: 'dodecahedron' },
-    { p: 'tetrahedron', s: 'octahedron' },
-    { p: 'tetrahedron', s: 'dodecahedron' },
-    { p: 'octahedron', s: 'dodecahedron' }
-];
-
-export const CLASS_MAP = {
-  'Firewall':  { desc: 'Tank' },
-  'Daemon':    { desc: 'DPS' },
-  'Admin':     { desc: 'Support' },
-  'Root':      { desc: 'Heavy' },
-  'Script':    { desc: 'Rogue' },
-  'Antivirus': { desc: 'Healer' }
-};
-
-export const SHAPES_2D = ['circle', 'square', 'triangle', 'rhombus', 'hexagon', 'invertedTriangle'];
-
+// --- 2D ICON GENERATOR (SVG PATHS) ---
 export const get2DShapePoints = (type, cx, cy, r) => {
     const toRad = (deg) => deg * Math.PI / 180;
+    
     switch (type) {
-        case 'circle': return null; 
-        case 'square': return `${cx-r},${cy-r} ${cx+r},${cy-r} ${cx+r},${cy+r} ${cx-r},${cy+r}`;
-        case 'triangle': return `${cx},${cy-r} ${cx+r*0.866},${cy+r*0.5} ${cx-r*0.866},${cy+r*0.5}`;
-        case 'invertedTriangle': return `${cx},${cy+r} ${cx+r*0.866},${cy-r*0.5} ${cx-r*0.866},${cy-r*0.5}`;
-        case 'rhombus': return `${cx},${cy-r} ${cx+r},${cy} ${cx},${cy+r} ${cx-r},${cy}`;
-        case 'hexagon':
-            let hex = "";
-            for(let i=0; i<6; i++) { hex += `${cx + r*Math.cos(toRad(i*60-90))},${cy + r*Math.sin(toRad(i*60-90))} `; }
-            return hex;
-        default: return "";
+        case 'shield':
+            return `M ${cx - r * 0.8} ${cy - r * 0.8} 
+                    L ${cx + r * 0.8} ${cy - r * 0.8} 
+                    Q ${cx + r * 0.8} ${cy + r * 0.2} ${cx} ${cy + r} 
+                    Q ${cx - r * 0.8} ${cy + r * 0.2} ${cx - r * 0.8} ${cy - r * 0.8} Z`;
+
+        case 'x':
+            const w = r * 0.3;
+            return `M ${cx - r} ${cy - r + w} L ${cx - w} ${cy} L ${cx - r} ${cy + r - w} 
+                    L ${cx - r + w} ${cy + r} L ${cx} ${cy + w} L ${cx + r - w} ${cy + r} 
+                    L ${cx + r} ${cy + r - w} L ${cx + w} ${cy} L ${cx + r} ${cy - r + w} 
+                    L ${cx + r - w} ${cy - r} L ${cx} ${cy - w} L ${cx - r + w} ${cy - r} Z`;
+
+        case 'plus':
+            const pw = r * 0.4;
+            return `M ${cx - pw} ${cy - r} L ${cx + pw} ${cy - r} L ${cx + pw} ${cy - pw} 
+                    L ${cx + r} ${cy - pw} L ${cx + r} ${cy + pw} L ${cx + pw} ${cy + pw} 
+                    L ${cx + pw} ${cy + r} L ${cx - pw} ${cy + r} L ${cx - pw} ${cy + pw} 
+                    L ${cx - r} ${cy + pw} L ${cx - r} ${cy - pw} L ${cx - pw} ${cy - pw} Z`;
+
+        case 'star':
+            let path = "";
+            for (let i = 0; i < 10; i++) {
+                const angle = toRad(i * 36 - 90);
+                const rad = i % 2 === 0 ? r : r * 0.4;
+                const x = cx + Math.cos(angle) * rad;
+                const y = cy + Math.sin(angle) * rad;
+                path += (i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`);
+            }
+            return path + " Z";
+
+        case 'hourglass':
+            return `M ${cx - r} ${cy - r} L ${cx + r} ${cy - r} L ${cx} ${cy} L ${cx + r} ${cy + r} L ${cx - r} ${cy + r} L ${cx} ${cy} Z`;
+
+        case 'target':
+            const cPath = `M ${cx} ${cy - r} A ${r} ${r} 0 1 0 ${cx} ${cy + r} A ${r} ${r} 0 1 0 ${cx} ${cy - r} Z`;
+            const lPath = `M ${cx} ${cy - r} L ${cx} ${cy + r} M ${cx - r} ${cy} L ${cx + r} ${cy}`;
+            return cPath + " " + lPath; 
+
+        default: 
+            return `M ${cx} ${cy} m -${r}, 0 a ${r},${r} 0 1,0 ${r * 2},0 a ${r},${r} 0 1,0 -${r * 2},0`;
     }
 };
 
@@ -186,14 +243,19 @@ export class Particle {
     this.x = (Math.random() - 0.5) * width * 2;
     this.y = (Math.random() - 0.5) * height * 2;
     this.z = initial ? Math.random() * TUNNEL_DEPTH : TUNNEL_DEPTH;
-    const speed = (2 + Math.random() * 4) * 5; 
+    
+    const speed = (2 + Math.random() * 4) * 2.5; 
+    
     const angle = Math.random() * Math.PI * 2;
     this.vx = Math.cos(angle) * speed * 0.3;
     this.vy = Math.sin(angle) * speed * 0.3;
     this.vz = -speed;
-    this.size = 2 + Math.random() * 3; 
-    this.opacity = 0.6 + Math.random() * 0.4; 
+    
+    this.size = 4 + Math.random() * 6; 
+    this.opacity = 0.3 + Math.random() * 0.2; 
+    
     this.twinkle = Math.random() * Math.PI * 2;
+    this.char = Math.random() > 0.5 ? '1' : '0'; 
   }
   update(width, height, warpFactor = 1) {
     this.x += this.vx * warpFactor;

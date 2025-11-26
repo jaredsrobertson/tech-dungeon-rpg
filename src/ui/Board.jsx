@@ -3,11 +3,10 @@ import { audio } from '../engine/audio/audio';
 import { AudioSystem } from '../engine/audio/AudioSystem';
 import { PlayerIcon, IconAttack, IconDefend } from './components';
 import { TunnelRenderer } from '../engine/renderer/renderer';
-import { SHAPES_2D, COLOR_PAIRS, generateGlitchText, THEME } from '../game/constants';
-
-// Removed redundant getPlayerVisuals function
+import { CLASSES, generateGlitchText, THEME } from '../game/constants';
 
 export function KernelBoard({ G, moves, playerID }) {
+  // --- 1. STATE HOOKS ---
   const [gameStarted, setGameStarted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [attackMode, setAttackMode] = useState(false);
@@ -19,6 +18,13 @@ export function KernelBoard({ G, moves, playerID }) {
   const [speakingId, setSpeakingId] = useState(null);
   const [currentSpeech, setCurrentSpeech] = useState('');
   
+  // NEW: Dynamic Scale State
+  const [uiScale, setUiScale] = useState(1);
+
+  // Track previous phase to detect transitions
+  const prevPhaseRef = useRef(G.phase);
+
+  // --- 2. MEMOIZED DATA ---
   const enemiesList = useMemo(() => Object.values(G.enemies || {}), [G.enemies]);
   const playersList = useMemo(() => G.players, [G.players]);
   
@@ -28,17 +34,29 @@ export function KernelBoard({ G, moves, playerID }) {
       .sort((a, b) => b.speed - a.speed);
   }, [G.players, G.enemies]);
 
+  // --- 3. CALLBACKS & EFFECTS ---
+  
+  // NEW: Handle Resize Scaling
+  useEffect(() => {
+      const handleResize = () => {
+          const width = window.innerWidth;
+          const baseWidth = 1600; // Ideal design width
+          // Scale down if smaller than base, cap at 1.0
+          const newScale = Math.min(1, width / baseWidth); 
+          setUiScale(newScale);
+      };
+      
+      window.addEventListener('resize', handleResize);
+      handleResize(); // Init
+      
+      return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const handleNewGame = () => {
       audio.init();
       setGameStarted(true);
       setVisualSeed(Math.floor(Math.random() * 100000));
       audio.warp(); 
-      setTimeout(() => {
-          setSpeechQueue([
-              { id: 'e1', text: generateGlitchText() }, 
-              { id: 'e2', text: generateGlitchText() }
-          ]);
-      }, 800);
   };
 
   const handleLockedOption = () => {
@@ -53,6 +71,19 @@ export function KernelBoard({ G, moves, playerID }) {
         osc.connect(gain);
         gain.connect(audio.masterGain);
         osc.start(); osc.stop(audio.ctx.currentTime + 0.15);
+      }
+  };
+
+  // Lobby Card Click Handler (Toggle Logic)
+  const handleCardClick = (classID, isClaimed, isMine) => {
+      if (!isClaimed) {
+          audio.blip();
+          moves.claimHero(classID);
+      } else if (isMine) {
+          audio.blip();
+          moves.releaseHero(classID);
+      } else {
+          handleLockedOption();
       }
   };
 
@@ -71,8 +102,26 @@ export function KernelBoard({ G, moves, playerID }) {
   }, [moves]);
 
   useEffect(() => {
+      if (gameStarted) {
+          audio.init();
+      }
+  }, [gameStarted]);
+
+  useEffect(() => {
+      if (prevPhaseRef.current === 'lobby' && G.phase === 'combat') {
+          setTimeout(() => {
+              setSpeechQueue([
+                  { id: 'e1', text: generateGlitchText() }, 
+                  { id: 'e2', text: generateGlitchText() }
+              ]);
+          }, 800);
+      }
+      prevPhaseRef.current = G.phase;
+  }, [G.phase]);
+
+  useEffect(() => {
       if (G.phase !== 'combat' || isTransitioning) return;
-      if (G.activeEntity.startsWith('e')) {
+      if (G.activeEntity && G.activeEntity.startsWith('e')) {
           const enemy = G.enemies[G.activeEntity];
           if (!enemy || enemy.hp <= 0) { moves.enemyAttack(G.activeEntity); return; }
           if (!enemy.isCharging) { moves.enemySelectTarget(G.activeEntity); } 
@@ -81,7 +130,7 @@ export function KernelBoard({ G, moves, playerID }) {
               return () => clearTimeout(timer);
           }
       }
-      if (G.activeEntity.startsWith('e')) setAttackMode(false);
+      if (G.activeEntity && G.activeEntity.startsWith('e')) setAttackMode(false);
   }, [G.activeEntity, G.phase, isTransitioning, G.enemies, moves]);
 
   useEffect(() => {
@@ -101,7 +150,7 @@ export function KernelBoard({ G, moves, playerID }) {
         if (!gameStarted || isWarping || speakingId) return;
         const key = e.key.toLowerCase();
         if (key === 'escape') { audio.blip(); setMenuOpen(m => !m); setAttackMode(false); } 
-        else if (!menuOpen && !G.activeEntity.startsWith('e')) {
+        else if (!menuOpen && G.activeEntity && !G.activeEntity.startsWith('e')) {
             if (key === 'a') { audio.blip(); setAttackMode(m => !m); }
             if (key === 'd') { moves.defend(); setAttackMode(false); }
             if (attackMode && (key === '1' || key === '2')) {
@@ -121,7 +170,9 @@ export function KernelBoard({ G, moves, playerID }) {
           const t = setTimeout(() => setTransitioning(false), 1000);
           return () => clearTimeout(t);
       }
-  }, [G.activeEntity]);
+  }, [G.activeEntity, G.phase]);
+
+  // --- 4. CONDITIONAL RENDER LOGIC ---
 
   if (!gameStarted) {
       return (
@@ -140,11 +191,76 @@ export function KernelBoard({ G, moves, playerID }) {
       );
   }
 
+  if (G.phase === 'lobby') {
+      const canStart = Object.values(G.lobbyState).some(id => id !== null);
+      
+      return (
+          <div className="lobby-container">
+              <h1 className="logo-main" style={{ fontSize: '2.5rem', marginBottom: '2rem' }} data-text="SELECT PROTOCOLS">SELECT PROTOCOLS</h1>
+              
+              <div className="class-grid">
+                  {Object.keys(CLASSES).map(classID => {
+                      const def = CLASSES[classID];
+                      const owner = G.lobbyState[classID];
+                      const isClaimed = owner !== null;
+                      const isMine = isClaimed && (String(owner) === String(playerID));
+                      
+                      let cardClass = 'class-card';
+                      if (isMine) cardClass += ' claimed';
+                      else if (isClaimed) cardClass += ' locked';
+
+                      return (
+                          <div 
+                            key={classID} 
+                            className={cardClass}
+                            onClick={() => handleCardClick(classID, isClaimed, isMine)}
+                          >
+                              <div className="class-icon">
+                                  <PlayerIcon classID={classID} size={80} />
+                              </div>
+                              <div className="class-info">
+                                  <h3>{def.name}</h3>
+                                  <span className="class-role">[{def.role}]</span>
+                                  <p className="class-desc">{def.ability.desc}</p>
+                                  <div className="class-stats">
+                                      <span>HP: {def.hp}</span>
+                                  </div>
+                              </div>
+                              <div className="class-actions">
+                                  {!isClaimed && (
+                                      <button className="btn-title btn-small">INITIALIZE</button>
+                                  )}
+                                  {isMine && (
+                                      <button className="btn-title btn-small btn-danger">DISCONNECT</button>
+                                  )}
+                                  {isClaimed && !isMine && (
+                                      <div className="locked-label">LOCKED // P{owner}</div>
+                                  )}
+                              </div>
+                          </div>
+                      );
+                  })}
+              </div>
+
+              <div className="lobby-footer">
+                  <button 
+                      className="btn-title" 
+                      disabled={!canStart} 
+                      onClick={() => { audio.warp(); moves.startRun(); }}
+                      style={{ width: '300px', marginTop: '30px' }}
+                  >
+                      [ JACK IN ]
+                  </button>
+              </div>
+          </div>
+      );
+  }
+
   return (
     <>
       <AudioSystem G={G} />
 
-      {!isWarping && (
+      {!isWarping && turnOrder.length > 0 && (
           <div style={{
               position: 'fixed', top: '15px', left: '50%', transform: 'translateX(-50%)',
               display: 'flex', alignItems: 'center', gap: '8px', zIndex: 10000,
@@ -155,8 +271,7 @@ export function KernelBoard({ G, moves, playerID }) {
               {turnOrder.map((entity, i) => {
                   const isActive = entity.id === G.activeEntity;
                   const isEnemy = entity.id.startsWith('e');
-                  // Use player's visual color for turn order display
-                  const color = isEnemy ? '#ff0055' : COLOR_PAIRS[entity.visuals?.colorIdx || 0].p;
+                  const color = isEnemy ? '#ff0055' : (CLASSES[entity.classID]?.color || '#00ff41');
                   
                   return (
                       <div key={entity.id} style={{
@@ -170,7 +285,7 @@ export function KernelBoard({ G, moves, playerID }) {
                       }}>
                            {isEnemy ? 
                               <span style={{color: isActive ? '#000' : color, fontWeight:'bold', fontSize:'0.7rem'}}>{entity.name[0]}</span> 
-                              : <PlayerIcon visuals={entity.visuals} size={20} />
+                              : <PlayerIcon classID={entity.classID} size={20} />
                           }
                       </div>
                   );
@@ -194,6 +309,7 @@ export function KernelBoard({ G, moves, playerID }) {
         onEnemyHover={setHoveredEnemy}
         onBackgroundClick={() => setAttackMode(false)}
         attackMode={attackMode}
+        uiScale={uiScale} // <--- PASSING SCALE TO RENDERER
       />
       
       <div style={{position:'fixed', top:0, left:0, width:'100%', padding:'20px', display:'flex', justifyContent:'flex-end', zIndex:10000, pointerEvents:'none'}}>
@@ -217,23 +333,26 @@ export function KernelBoard({ G, moves, playerID }) {
             position: 'fixed', bottom: '10px', width: '100%', 
             display: 'flex', justifyContent: 'center', 
             gap: `${THEME.PLAYER.GAP}px`, 
-            zIndex: 10000 
+            zIndex: 10000,
+            // NEW: Apply dynamic scaling to the UI container
+            transform: `scale(${uiScale})`,
+            transformOrigin: 'bottom center',
+            pointerEvents: 'none' // Container passes events through...
         }}>
             {Object.values(G.players).map(player => {
                 const isActive = G.activeEntity === player.id;
-                // Get colors directly from player's visuals object
-                const colors = COLOR_PAIRS[player.visuals?.colorIdx || 0];
-                const primary = colors.p;
-                const dim = colors.s;
+                const classDef = CLASSES[player.classID] || CLASSES.firewall;
+                const primary = classDef.color;
+                const dim = '#444'; 
 
                 const standardGreen = '#00FF41';
                 const cardBorderColor = isActive ? standardGreen : '#004411';
-                const cardTextColor = isActive ? primary : dim; 
+                const cardTextColor = isActive ? primary : '#888'; 
                 const cardShadow = isActive ? `0 0 15px ${standardGreen}` : 'none';
 
                 const btnStyle = {
                     flex: 1, border: `1px solid ${dim}`, background: 'transparent',
-                    color: dim, 
+                    color: '#888', 
                     cursor: 'pointer', transition: 'all 0.2s',
                     height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
                     padding: 0
@@ -242,13 +361,7 @@ export function KernelBoard({ G, moves, playerID }) {
                 const activeBtnStyle = { ...btnStyle, background: primary, color: '#000', border: `1px solid ${primary}` };
 
                 return (
-                    <div key={player.id} style={{ position: 'relative' }}>
-                        <div style={{ 
-                            position: 'absolute', bottom: THEME.PLAYER.BOTTOM_OFFSET, left: '50%', transform: 'translateX(-50%)',
-                            width: THEME.PLAYER.WIDTH, height: THEME.PLAYER.WIDTH, pointerEvents: 'none', zIndex: 50
-                        }}>
-                        </div>
-
+                    <div key={player.id} style={{ position: 'relative', pointerEvents: 'auto' }}> {/* Children are interactive */}
                         <div style={{ 
                             width: `${THEME.PLAYER.WIDTH}px`, 
                             height: '90px', 
@@ -263,8 +376,7 @@ export function KernelBoard({ G, moves, playerID }) {
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                                 background: 'rgba(0,0,0,0.3)'
                             }}>
-                                {/* Pass the player's visuals object to the icon component */}
-                                <PlayerIcon visuals={player.visuals} size={45} />
+                                <PlayerIcon classID={player.classID} size={45} />
                             </div>
 
                             <div style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -309,7 +421,7 @@ export function KernelBoard({ G, moves, playerID }) {
                                                 style={btnStyle}
                                                 onClick={() => moves.defend()}
                                                 onMouseEnter={(e) => {e.currentTarget.style.color = primary; e.currentTarget.style.border = `1px solid ${primary}`}}
-                                                onMouseLeave={(e) => {e.currentTarget.style.color = dim; e.currentTarget.style.border = `1px solid ${dim}`}}
+                                                onMouseLeave={(e) => {e.currentTarget.style.color = '#888'; e.currentTarget.style.border = `1px solid ${dim}`}}
                                                 title="DEFEND"
                                             >
                                                 <IconDefend />
@@ -327,6 +439,23 @@ export function KernelBoard({ G, moves, playerID }) {
                 );
             })}
         </div>
+      )}
+
+      {/* NEW: Defeat Modal */}
+      {G.phase === 'defeat' && (
+          <div className="modal-overlay">
+              <div style={{textAlign:'center', border: '2px solid #cc0044', padding: '40px', background: 'rgba(0,0,0,0.9)'}}>
+                  <h1 style={{fontSize:'4rem', color:'#cc0044', marginBottom:20, textShadow: '0 0 10px #cc0044'}}>SYSTEM FAILURE</h1>
+                  <p style={{color: '#fff', marginBottom: '30px', fontFamily: 'monospace'}}>CRITICAL KERNEL PANIC // DATA LOST</p>
+                  <button 
+                    className="btn-title" 
+                    style={{borderColor: '#cc0044', color: '#cc0044'}}
+                    onClick={() => window.location.reload()}
+                  >
+                      [ REBOOT SYSTEM ]
+                  </button>
+              </div>
+          </div>
       )}
 
       {G.phase === 'victory' && !isWarping && (

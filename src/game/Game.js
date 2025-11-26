@@ -1,4 +1,4 @@
-import { CLASS_MAP } from './constants'; // Import if needed for logic
+import { CLASSES } from './constants';
 
 const CELL_WIDTH = 500;  
 const CELL_HEIGHT = 350; 
@@ -52,64 +52,103 @@ const triggerEvent = (G, type, payload = {}) => {
     G.lastEvent = { id: G.eventCount, type, ...payload };
 };
 
-// Helper for Randomization
-const shuffleArray = (array) => {
-    const arr = [...array];
-    for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-};
-
 export const KernelPanic = {
   name: 'terminal-exe',
   minPlayers: 1,
   maxPlayers: 6,
 
   setup: () => {
-    const e1Pos = assignSlot([], 'e1');
-    const e2Pos = assignSlot([{ ...e1Pos, id: 'e1', hp: 100 }], 'e2');
-
-    // RANDOM VISUAL ASSIGNMENT
-    // Indices 0-5 for Colors and Shape Pairs
-    const colorIndices = shuffleArray([0, 1, 2, 3, 4, 5]);
-    const shapeIndices = shuffleArray([0, 1, 2, 3, 4, 5]);
-    const iconIndices  = shuffleArray([0, 1, 2, 3, 4, 5]); // For 2D icon shapes
-
-    const createPlayer = (id, name, hp, speed, pClass, desc, idx) => ({
-        id, name, hp, maxHp: hp, speed, class: pClass, desc, isDefending: false,
-        // Assign distinct visual config
-        visuals: {
-            colorIdx: colorIndices[idx],
-            shapePairIdx: shapeIndices[idx],
-            iconShapeIdx: iconIndices[idx]
-        }
-    });
+    // Initialize Lobby State
+    const lobbyState = {};
+    Object.keys(CLASSES).forEach(key => lobbyState[key] = null);
 
     return {
-        players: {
-          '0': createPlayer('0', 'Firewall', 120, 5, 'Firewall', 'Tank', 0),
-          '1': createPlayer('1', 'Daemon', 80, 12, 'Daemon', 'DPS', 1),
-          '2': createPlayer('2', 'Admin', 100, 8, 'Admin', 'Support', 2),
-          '3': createPlayer('3', 'Root', 150, 2, 'Root', 'Heavy', 3),
-          '4': createPlayer('4', 'Script', 60, 15, 'Script', 'Rogue', 4),
-          '5': createPlayer('5', 'Bot', 90, 10, 'Antivirus', 'Healer', 5),
-        },
-        enemies: {
-          'e1': { id: 'e1', name: 'Glitch', hp: 50, maxHp: 50, speed: 8, ...e1Pos, isCharging: false, targetId: null },
-          'e2': { id: 'e2', name: 'Trojan', hp: 100, maxHp: 100, speed: 4, ...e2Pos, isCharging: false, targetId: null }
-        },
-        activeEntity: '1',
-        phase: 'combat',
+        players: {},
+        enemies: {},
+        lobbyState,
+        activeEntity: null,
+        phase: 'lobby', // Start in Lobby
         depth: 1,
-        log: ['> SYSTEM BOOT', '> SECTOR 1 INITIALIZED', '> RANDOMIZED VISUAL PROTOCOLS ACTIVE'],
+        log: ['> SYSTEM BOOT', '> AWAITING PROTOCOL SELECTION...'],
         eventCount: 0,
         lastEvent: null
     };
   },
 
   moves: {
+    claimHero: ({ G, ctx }, classID) => {
+        // FIX: Strictly check for undefined. ctx.playerID might be undefined in some local contexts.
+        const pid = (ctx.playerID !== undefined && ctx.playerID !== null) 
+            ? ctx.playerID 
+            : ctx.currentPlayer;
+        
+        if (G.lobbyState[classID] === null) {
+            G.lobbyState[classID] = String(pid);
+        }
+    },
+
+    releaseHero: ({ G, ctx }, classID) => {
+        // FIX: Apply same strict check here
+        const pid = (ctx.playerID !== undefined && ctx.playerID !== null) 
+            ? ctx.playerID 
+            : ctx.currentPlayer;
+        
+        if (G.lobbyState[classID] === String(pid)) {
+            G.lobbyState[classID] = null;
+        }
+    },
+
+    startRun: ({ G, ctx }) => {
+        const claimed = Object.entries(G.lobbyState).filter(([k, pid]) => pid !== null);
+        if (claimed.length === 0) return; // Validation
+
+        // Initialize Players
+        G.players = {};
+        claimed.forEach(([classID, pid]) => {
+            const def = CLASSES[classID];
+            // Determine speed based on Role roughly to ensure turn order variety
+            let baseSpeed = 10;
+            if (def.role === 'Tank') baseSpeed = 5;
+            if (def.role === 'DPS') baseSpeed = 12;
+            if (def.role === 'Rogue') baseSpeed = 14;
+            if (def.role === 'Sniper') baseSpeed = 11;
+            if (def.role === 'Healer') baseSpeed = 8;
+            if (def.role === 'Support') baseSpeed = 7;
+
+            G.players[classID] = {
+                id: classID,
+                name: def.name,
+                hp: def.hp,
+                maxHp: def.hp,
+                speed: baseSpeed,
+                class: def.name,
+                classID: classID,
+                desc: def.role,
+                owner: pid,
+                isDefending: false,
+                patches: []
+            };
+        });
+
+        // Transition Phase
+        G.phase = 'combat';
+        G.log.push('> NEURAL LINK ESTABLISHED', '> ENTERING SECTOR 1');
+
+        // Spawn Enemies
+        const e1Pos = assignSlot([], 'e1');
+        const e2Pos = assignSlot([{ ...e1Pos, id: 'e1', hp: 100 }], 'e2');
+        G.enemies = {
+          'e1': { id: 'e1', name: 'Glitch', hp: 50, maxHp: 50, speed: 8, ...e1Pos, isCharging: false, targetId: null },
+          'e2': { id: 'e2', name: 'Trojan', hp: 100, maxHp: 100, speed: 4, ...e2Pos, isCharging: false, targetId: null }
+        };
+
+        // Set Active Entity
+        const order = getActiveEntities(G);
+        if (order.length > 0) {
+            G.activeEntity = order[0].id;
+        }
+    },
+
     attack: ({ G }, targetId) => {
       const player = G.players[G.activeEntity];
       const enemy = G.enemies[targetId];

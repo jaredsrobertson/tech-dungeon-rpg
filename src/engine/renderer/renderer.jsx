@@ -24,7 +24,8 @@ export const TunnelRenderer = React.memo(({
   onEnemyClick = () => {}, 
   onEnemyHover = () => {}, 
   onBackgroundClick = () => {}, 
-  attackMode = false 
+  attackMode = false,
+  uiScale = 1 // NEW PROP
 }) => {
   const canvasRef = useRef(null);
   
@@ -47,6 +48,7 @@ export const TunnelRenderer = React.memo(({
   const activeEntityRef = useRef(activeEntity);
   const isWarpingRef = useRef(isWarping);
   const lastActiveEnemyRef = useRef(null);
+  const uiScaleRef = useRef(uiScale); // Track scale ref for animation loop
   
   const damageTimers = useRef({}); 
   const deathTimers = useRef({}); 
@@ -63,6 +65,11 @@ export const TunnelRenderer = React.memo(({
       lastUpdate: 0,
       completeTimer: null
   });
+
+  // Update Ref when prop changes
+  useEffect(() => {
+      uiScaleRef.current = uiScale;
+  }, [uiScale]);
 
   useEffect(() => {
     if (depth !== prevDepthRef.current) {
@@ -209,6 +216,7 @@ export const TunnelRenderer = React.memo(({
       drawEnemies({
           ctx, width, height,
           enemies: enemiesRef.current,
+          players: playersRef.current,
           visualStateRef: visualState,
           damageTimersRef: damageTimers,
           deathTimersRef: deathTimers,
@@ -223,7 +231,8 @@ export const TunnelRenderer = React.memo(({
               ctx, width, height,
               players: playersRef.current,
               visualSeed,
-              time: timeRef.current
+              time: timeRef.current,
+              uiScale: uiScaleRef.current // <--- PASS SCALE TO LAYERS
           });
       }
 
@@ -285,11 +294,18 @@ export const TunnelRenderer = React.memo(({
           const pending = pendingDamageRef.current[player.id];
           if (pending) {
               const { WIDTH, GAP } = THEME.PLAYER;
-              const totalWidth = WIDTH * 2 + GAP;
-              let screenX;
-              if (index === 0) screenX = (width / 2) - (totalWidth / 2) + (WIDTH / 2);
-              else screenX = (width / 2) + (totalWidth / 2) - (WIDTH / 2);
-              const screenY = height - 260; 
+              // Scale calculation for Floating Text too
+              const scale = uiScaleRef.current;
+              const totalWidth = (WIDTH * Object.keys(playersRef.current).length) + (GAP * (Object.keys(playersRef.current).length - 1));
+              // Note: This Floating Text logic for players is still static/approximate. 
+              // Ideally it should use the same calc as drawPlayers.
+              // For now, we'll leave it as is or apply simple scaling if needed.
+              
+              // Recalc for accurate text placement
+              const totalWidthScaled = totalWidth * scale;
+              const startX = (width / 2) - (totalWidthScaled / 2);
+              const screenX = startX + (index * (WIDTH * scale + GAP * scale)) + (WIDTH * scale / 2);
+              const screenY = height - (220 * scale); // Scaled offset
               
               floatingTextsRef.current.push(new FloatingText(screenX, screenY, `${pending.val}`, '#ff0000'));
               const critKey = `${player.id}_${now}`;
@@ -320,7 +336,7 @@ export const TunnelRenderer = React.memo(({
         floatingTextsRef.current = [];
         gradientCache.current = [];
     };
-  }, [visualSeed]); // Removed speakingId from deps (handled via Ref now)
+  }, [visualSeed]); 
 
   return (
       <canvas ref={canvasRef} onClick={handleCanvasClick} onMouseMove={handleCanvasMouseMove} style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 0 }} />
@@ -336,5 +352,6 @@ export const TunnelRenderer = React.memo(({
            prev.enemies === next.enemies &&
            prev.players === next.players &&
            prev.attackMode === next.attackMode &&
-           prev.visualSeed === next.visualSeed; 
+           prev.visualSeed === next.visualSeed &&
+           prev.uiScale === next.uiScale; // Include uiScale in prop comparison
 });

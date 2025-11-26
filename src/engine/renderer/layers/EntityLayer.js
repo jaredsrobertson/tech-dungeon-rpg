@@ -1,8 +1,8 @@
-import { GLITCH_CHARS, SHAPES, SHAPE_PAIRS, COLOR_PAIRS, THEME } from '../../../game/constants';
+import { GLITCH_CHARS, SHAPES, CLASSES, THEME } from '../../../game/constants';
 import { rotateVertices } from '../../../utils/math';
 import { project3D, drawShapeFaces, lerp } from '../renderHelpers';
 
-// --- INTERNAL HELPERS ---
+// ... (Keep updateVisualState, drawCoreGlow, drawDeathEffect, calculateCombatOffsets unchanged) ...
 const updateVisualState = (enemy, visualStateRef, time) => {
     let viz = visualStateRef.current[enemy.id];
     if (!viz) {
@@ -71,15 +71,27 @@ const calculateCombatOffsets = (enemy, attackTimersRef, damageTimersRef, time, n
     return { offsetX: shakeX, offsetY: shakeY, offsetZ: surgeZ, isDamaged, isFiring, isCharging, attackTimer };
 };
 
-const drawLaser = (ctx, pos, attackTimer, width, height) => {
+// --- UPDATED LASER DRAWING ---
+const drawLaser = (ctx, pos, attackTimer, width, height, players) => {
     if (!attackTimer) return;
-    const { WIDTH, GAP } = THEME.PLAYER;
-    const totalWidth = (WIDTH * 6) + (GAP * 5); 
-    let playerX;
-    const pIndex = parseInt(attackTimer.targetId) || 0;
+    const playerList = Object.values(players);
+    const targetIndex = playerList.findIndex(p => p.id === attackTimer.targetId);
+    if (targetIndex === -1) return;
+
+    // RECALCULATE POSITIONS BASED ON CURRENT WIDTH/LAYOUT
+    // This assumes the laser targets where the UI is. 
+    // Since we don't pass uiScale here, we fallback to calculating center alignment which works for standard layout.
+    // Ideally we'd pass uiScale here too, but for now let's just center it.
+    const { WIDTH, GAP, BOTTOM_OFFSET } = THEME.PLAYER;
+    const numPlayers = playerList.length;
+    
+    // Approximating scale based on width to ensure laser hits correct spot even if we don't pass 'uiScale' explicitly yet
+    // But let's assume standard layout for laser for now as it's a transient effect
+    const totalWidth = (WIDTH * numPlayers) + (GAP * (numPlayers - 1));
     const startX = (width / 2) - (totalWidth / 2);
-    playerX = startX + (pIndex * (WIDTH + GAP)) + (WIDTH / 2);
-    const playerY = height - THEME.PLAYER.BOTTOM_OFFSET; 
+    const playerX = startX + (targetIndex * (WIDTH + GAP)) + (WIDTH / 2);
+    const playerY = height - BOTTOM_OFFSET; 
+    
     ctx.beginPath();
     ctx.moveTo(pos.x, pos.y);
     ctx.lineTo(playerX, playerY);
@@ -210,7 +222,8 @@ const drawEnemyTooltip = (ctx, enemy, pos, size) => {
 
 export const drawEnemies = ({
   ctx, width, height, 
-  enemies, visualStateRef, damageTimersRef, deathTimersRef, attackTimersRef,
+  enemies, players, 
+  visualStateRef, damageTimersRef, deathTimersRef, attackTimersRef,
   currentTarget, time, onHitZoneUpdate 
 }) => {
   const centerX = width / 2;
@@ -231,7 +244,9 @@ export const drawEnemies = ({
     const uiSize = THEME.ENEMY.SCALE_UI * pos.scale; 
     const wireframeSize = uiSize * THEME.ENEMY.SCALE_WIRE; 
     nextHitZones[enemy.id] = { x: pos.x, y: pos.y, r: wireframeSize * THEME.ENEMY.HIT_RADIUS }; 
-    if (isFiring) drawLaser(ctx, pos, attackTimer, width, height);
+    
+    if (isFiring) drawLaser(ctx, pos, attackTimer, width, height, players);
+    
     const isTargeted = currentTarget === enemy.id;
     drawEnemyWireframe(ctx, enemy, pos, uiSize, wireframeSize, time, isTargeted, isDamaged, isFiring, isCharging);
     if (isTargeted) { drawEnemyTooltip(ctx, enemy, pos, uiSize); }
@@ -239,11 +254,24 @@ export const drawEnemies = ({
   onHitZoneUpdate(nextHitZones);
 };
 
-export const drawPlayers = ({ ctx, width, height, players, visualSeed, time }) => {
-    const { WIDTH, GAP, BOTTOM_OFFSET, BASE_SIZE, ROTATION_SPEED, FLOAT_FREQ, FLOAT_AMP, MAG_PRIMARY, MAG_SECONDARY } = THEME.PLAYER;
+// --- UPDATED: DRAW PLAYERS WITH SCALING ---
+export const drawPlayers = ({ ctx, width, height, players, visualSeed, time, uiScale = 1 }) => {
+    const { 
+        WIDTH, GAP, BOTTOM_OFFSET, BASE_SIZE, ROTATION_SPEED, 
+        FLOAT_FREQ, FLOAT_AMP, SWAY_FREQ, SWAY_AMP_X, SWAY_AMP_SCALE, 
+        MAG_PRIMARY, MAG_SECONDARY 
+    } = THEME.PLAYER;
+    
+    // Apply UI Scale to constants
+    const sWidth = WIDTH * uiScale;
+    const sGap = GAP * uiScale;
+    const sOffset = BOTTOM_OFFSET * uiScale;
+    const sBaseSize = BASE_SIZE * uiScale;
+    const sSwayAmpX = SWAY_AMP_X * uiScale;
+
     const numPlayers = Object.keys(players).length;
-    const totalWidth = (WIDTH * numPlayers) + (GAP * (numPlayers - 1));
-    const avatarY = height - BOTTOM_OFFSET; 
+    const totalWidth = (sWidth * numPlayers) + (sGap * (numPlayers - 1));
+    const avatarY = height - sOffset; 
 
     const random = (modifier, totalSeed) => { 
         const x = Math.sin(totalSeed + modifier) * 10000; 
@@ -252,17 +280,24 @@ export const drawPlayers = ({ ctx, width, height, players, visualSeed, time }) =
 
     Object.values(players).forEach((player, index) => {
         const startX = (width / 2) - (totalWidth / 2);
-        const screenX = startX + (index * (WIDTH + GAP)) + (WIDTH / 2);
+        const baseScreenX = startX + (index * (sWidth + sGap)) + (sWidth / 2);
 
-        const visuals = player.visuals || { colorIdx: 0, shapePairIdx: 0 };
-        const colors = COLOR_PAIRS[visuals.colorIdx] || COLOR_PAIRS[0];
-        const shapeConfig = SHAPE_PAIRS[visuals.shapePairIdx] || SHAPE_PAIRS[0];
-        
-        const primaryShape = SHAPES[shapeConfig.p] || SHAPES.cube;
-        const secondaryShape = SHAPES[shapeConfig.s] || SHAPES.cube;
-        
+        const swayX = Math.sin((time * SWAY_FREQ) + (index * 2.5)) * sSwayAmpX;
+        const swayScale = 1.0 + Math.cos((time * SWAY_FREQ * 1.3) + (index * 1.5)) * SWAY_AMP_SCALE;
+
+        const screenX = baseScreenX + swayX;
+        const currentBaseSize = sBaseSize * swayScale;
+
         const idNum = parseInt(player.id) || 0;
         const totalSeed = (idNum * 2) + visualSeed;
+
+        const classDef = CLASSES[player.classID] || CLASSES.firewall;
+        const mainColor = classDef.color;
+        
+        const primaryShapeKey = classDef.shapes[0] || 'cube';
+        const secondaryShapeKey = classDef.shapes[1] || 'cube';
+        const primaryShape = SHAPES[primaryShapeKey];
+        const secondaryShape = SHAPES[secondaryShapeKey];
         const secondaryScale = 0.90 + random(400, totalSeed) * 0.20;
 
         const pMag = MAG_PRIMARY + random(90, totalSeed) * 0.002;
@@ -275,22 +310,23 @@ export const drawPlayers = ({ ctx, width, height, players, visualSeed, time }) =
         const sRotY = sMag * (random(103, totalSeed) > 0.5 ? 1 : -1); 
         const sRotZ = sMag * (random(107, totalSeed) > 0.5 ? 1 : -1); 
 
-        // ANIMATION OFFSET: index * 1.5
         const floatY = Math.sin((time * FLOAT_FREQ) + (index * 1.5)) * FLOAT_AMP; 
 
-        // Draw Central Glow
-        drawCoreGlow(ctx, screenX, avatarY + floatY, BASE_SIZE, colors.p);
+        drawCoreGlow(ctx, screenX, avatarY + floatY, currentBaseSize, mainColor);
 
         const renderShape = (vertices, faces, sx, sy, sz, scale, color, isSecondary, strokeColor) => {
             const angleX = time * ROTATION_SPEED * sx; 
             const angleY = time * ROTATION_SPEED * sy + (isSecondary ? 1.0 : 0);
             const angleZ = time * ROTATION_SPEED * sz;
-            const baseSize = BASE_SIZE * scale;
+            
+            const renderSize = currentBaseSize * scale;
+            
             const transformed = rotateVertices(vertices, angleX, angleY, angleZ);
             const projected = transformed.map(v => ({
-                x: screenX + v.x * baseSize,
-                y: avatarY + v.y * baseSize + floatY
+                x: screenX + v.x * renderSize,
+                y: avatarY + v.y * renderSize + floatY
             }));
+            
             const sortedFaces = faces.map(face => {
                 const indices = Array.isArray(face) ? face : [];
                 let avgZ = 0;
@@ -310,8 +346,7 @@ export const drawPlayers = ({ ctx, width, height, players, visualSeed, time }) =
             }
         };
 
-        // REMOVED WHITE BORDER: Passing 'colors.p' / 'colors.s' instead of '#ffffff'
-        if (primaryShape) renderShape(primaryShape.vertices, primaryShape.faces, pRotX, pRotY, pRotZ, 1.0, colors.p, false, colors.p);
-        if (secondaryShape) renderShape(secondaryShape.vertices, secondaryShape.faces, sRotX, sRotY, sRotZ, secondaryScale, colors.s, true, colors.s);
+        if (primaryShape) renderShape(primaryShape.vertices, primaryShape.faces, pRotX, pRotY, pRotZ, 1.0, mainColor, false, mainColor);
+        if (secondaryShape) renderShape(secondaryShape.vertices, secondaryShape.faces, sRotX, sRotY, sRotZ, secondaryScale, mainColor, true, mainColor);
     });
 };
