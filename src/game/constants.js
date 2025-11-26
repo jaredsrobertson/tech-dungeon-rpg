@@ -110,73 +110,33 @@ export const SHAPES = {
     faces: [[0,2,4],[0,4,3],[0,3,5],[0,5,2],[1,2,5],[1,5,3],[1,3,4],[1,4,2]]
   },
   dodecahedron: {
-    // VERIFIED DODECAHEDRON VERTICES
     vertices: [
-        // (±1, ±1, ±1)
+        // Cube Corners (0-7)
         [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
         [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1],
-        // (0, ±phi, ±1/phi)
+        // YZ Plane Rect (8-11)
         [0, PHI, INV_PHI], [0, PHI, -INV_PHI], [0, -PHI, INV_PHI], [0, -PHI, -INV_PHI],
-        // (±1/phi, 0, ±phi)
+        // XZ Plane Rect (12-15)
         [INV_PHI, 0, PHI], [INV_PHI, 0, -PHI], [-INV_PHI, 0, PHI], [-INV_PHI, 0, -PHI],
-        // (±phi, ±1/phi, 0)
+        // XY Plane Rect (16-19)
         [PHI, INV_PHI, 0], [PHI, -INV_PHI, 0], [-PHI, INV_PHI, 0], [-PHI, -INV_PHI, 0]
     ],
-    // VERIFIED FACE INDICES (Counter-Clockwise Winding)
     faces: [
-        [0, 16, 1, 9, 8],   [0, 8, 4, 14, 12], [0, 12, 2, 17, 16],
-        [1, 16, 17, 3, 13], [1, 13, 5, 9],     // Note: [1, 13, 5, 9, ?] -> Missing index in simple pattern
-        // Using explicitly robust index map:
-        [8, 9, 5, 18, 4],   [4, 18, 19, 6, 14], [14, 6, 10, 2, 12],
-        [2, 10, 11, 3, 17], [17, 3, 13, 15, 16],[16, 15, 19, 18, 8], // Wait...
-        // Let's define the faces explicitly one last time to be absolutely sure:
-        [0, 8, 9, 1, 16], [0, 16, 17, 2, 12], [12, 2, 10, 6, 14],
-        [14, 6, 19, 4, 8], [8, 4, 18, 5, 9], [9, 5, 13, 1, 16], // ERROR in trace
-        // FALLBACK TO STANDARD MESH DEFINITION
-        [0, 12, 14, 4, 8], [0, 8, 9, 1, 16], [0, 16, 17, 2, 12],
-        [8, 4, 18, 5, 9], [12, 2, 10, 6, 14], [14, 6, 19, 18, 4],
-        [1, 9, 5, 13, 16], [1, 16, 17, 3, 13], [2, 17, 3, 11, 10],
-        [6, 10, 11, 7, 19], [5, 18, 19, 7, 13], [3, 13, 7, 11, 3] // Last indices
-    ].map((f, i) => {
-       // Correcting the final specific faces manually based on visualization
-       if(i===3) return [4, 8, 9, 5, 18];
-       if(i===6) return [1, 13, 5, 9];
-       // Actually, let's replace the faces array entirely with the KNOWN GOOD SET
-       return f;
-    })
+        [0, 16, 1, 9, 8],
+        [0, 8, 4, 14, 12],
+        [0, 12, 2, 17, 16],
+        [1, 9, 5, 13, 16],
+        [1, 16, 17, 3, 13],
+        [2, 12, 14, 6, 10],
+        [2, 10, 11, 3, 17],
+        [3, 11, 7, 15, 13],
+        [4, 8, 9, 5, 18],
+        [4, 18, 19, 6, 14],
+        [5, 18, 19, 7, 15], 
+        [6, 14, 4, 18, 19]  
+    ]
   }
 };
-
-// OVERRIDE DODECAHEDRON WITH KNOWN GOOD SET (Standard Indexed Mesh)
-SHAPES.dodecahedron = {
-    vertices: [
-        // 0-3
-        [0, PHI, INV_PHI], [0, PHI, -INV_PHI], [0, -PHI, INV_PHI], [0, -PHI, -INV_PHI],
-        // 4-7
-        [INV_PHI, 0, PHI], [INV_PHI, 0, -PHI], [-INV_PHI, 0, PHI], [-INV_PHI, 0, -PHI],
-        // 8-11
-        [PHI, INV_PHI, 0], [PHI, -INV_PHI, 0], [-PHI, INV_PHI, 0], [-PHI, -INV_PHI, 0],
-        // 12-19 (Cube corners)
-        [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
-        [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1]
-    ],
-    faces: [
-        [0, 12, 8, 13, 1],   [0, 1, 17, 7, 6],    [0, 6, 16, 4, 12],
-        [12, 4, 2, 14, 8],   [8, 14, 9, 15, 13],  [13, 15, 3, 19, 1],
-        [1, 19, 11, 17, 1],  [17, 11, 5, 18, 7],  [7, 18, 10, 16, 6],
-        [6, 16, 2, 4, 6],    [2, 10, 18, 5, 14],  [14, 5, 11, 19, 3],
-        [3, 15, 9, 10, 2]    // Fixed winding
-    ].map(f => f.slice(0, 5))
-};
-
-// Simplify: The above indexing logic is still prone to off-by-one errors without 
-// a 3D modeler. Using this definitive mathematical set instead:
-SHAPES.dodecahedron.faces = [
-    [12, 0, 1, 13, 8], [12, 8, 14, 2, 4], [12, 4, 16, 6, 0],
-    [1, 0, 6, 7, 17], [1, 17, 11, 19, 13], [8, 13, 19, 3, 15],
-    [8, 15, 9, 14, 8], [4, 2, 10, 18, 16], [16, 18, 7, 6, 16], // Fixed
-    [2, 14, 9, 5, 10], [10, 5, 11, 17, 7], [18, 10, 5, 11, 19], [19, 3, 15, 9, 5]
-].map(f => [f[0], f[1], f[2], f[3], f[4]]); // Ensure format
 
 // Normalize and center all shapes on load
 Object.keys(SHAPES).forEach(k => {
