@@ -7,9 +7,17 @@ export const TARGET_FPS = 60;
 // --- THEME CONFIGURATION ---
 export const THEME = {
   PLAYER: {
-    WIDTH: 220,
-    GAP: 15,
-    BOTTOM_OFFSET: 220, 
+    // LAYOUT CONSTANTS
+    CARD_HEIGHT_BASE: 120,   
+    SIDE_PADDING: 30,        
+    GAP: 10,                 
+    FLEX_INACTIVE: 1,        
+    FLEX_ACTIVE: 2.2,        
+    MAX_INACTIVE_WIDTH: 220, // NEW: Cap the size of a single unit
+    
+    // ANIMATION/SHAPE CONSTANTS
+    WIDTH: 220,         
+    BOTTOM_OFFSET: 250, 
     BASE_SIZE: 150,
     ROTATION_SPEED: 12, 
     FLOAT_FREQ: 1.2,    
@@ -60,7 +68,7 @@ export const CLASSES = {
     id: 'firewall',
     name: 'Firewall',
     role: 'Tank',
-    color: '#2E9AFE', // Blue
+    color: '#2E9AFE', 
     hp: 120,
     shapes: ['cube', 'octahedron'],
     icon: 'shield',
@@ -70,7 +78,7 @@ export const CLASSES = {
     id: 'crash',
     name: 'Crash',
     role: 'DPS',
-    color: '#FF4500', // Red-Orange
+    color: '#FF4500', 
     hp: 80,
     shapes: ['tetrahedron', 'cube'],
     icon: 'x',
@@ -80,7 +88,7 @@ export const CLASSES = {
     id: 'rootkit',
     name: 'Rootkit',
     role: 'Rogue',
-    color: '#9400D3', // Violet
+    color: '#9400D3', 
     hp: 70,
     shapes: ['dodecahedron', 'tetrahedron'],
     icon: 'star',
@@ -90,7 +98,7 @@ export const CLASSES = {
     id: 'zeroday',
     name: 'Zero Day',
     role: 'Sniper',
-    color: '#FFD700', // Yellow
+    color: '#FFD700', 
     hp: 60,
     shapes: ['octahedron', 'dodecahedron'],
     icon: 'target',
@@ -100,7 +108,7 @@ export const CLASSES = {
     id: 'av',
     name: 'Antivirus',
     role: 'Healer',
-    color: '#FFFFFF', // White
+    color: '#FFFFFF', 
     hp: 90,
     shapes: ['cube', 'dodecahedron'],
     icon: 'plus',
@@ -110,9 +118,9 @@ export const CLASSES = {
     id: 'daemon',
     name: 'Daemon',
     role: 'Support',
-    color: '#FF1493', // Pink
+    color: '#FF1493', 
     hp: 100,
-    shapes: ['tetrahedron', 'octahedron'], // UPDATED: Was ['dodecahedron', 'octahedron']
+    shapes: ['tetrahedron', 'octahedron'], 
     icon: 'hourglass',
     ability: { name: 'Background Process', desc: 'Passive buffs.' }
   }

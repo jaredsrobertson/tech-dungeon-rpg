@@ -72,25 +72,15 @@ const calculateCombatOffsets = (enemy, attackTimersRef, damageTimersRef, time, n
 };
 
 // --- UPDATED LASER DRAWING ---
-const drawLaser = (ctx, pos, attackTimer, width, height, players) => {
+const drawLaser = (ctx, pos, attackTimer, width, height, players, playerPositions) => {
     if (!attackTimer) return;
-    const playerList = Object.values(players);
-    const targetIndex = playerList.findIndex(p => p.id === attackTimer.targetId);
-    if (targetIndex === -1) return;
-
-    // RECALCULATE POSITIONS BASED ON CURRENT WIDTH/LAYOUT
-    // This assumes the laser targets where the UI is. 
-    // Since we don't pass uiScale here, we fallback to calculating center alignment which works for standard layout.
-    // Ideally we'd pass uiScale here too, but for now let's just center it.
-    const { WIDTH, GAP, BOTTOM_OFFSET } = THEME.PLAYER;
-    const numPlayers = playerList.length;
     
-    // Approximating scale based on width to ensure laser hits correct spot even if we don't pass 'uiScale' explicitly yet
-    // But let's assume standard layout for laser for now as it's a transient effect
-    const totalWidth = (WIDTH * numPlayers) + (GAP * (numPlayers - 1));
-    const startX = (width / 2) - (totalWidth / 2);
-    const playerX = startX + (targetIndex * (WIDTH + GAP)) + (WIDTH / 2);
-    const playerY = height - BOTTOM_OFFSET; 
+    // Find target position
+    const targetPos = playerPositions ? playerPositions[attackTimer.targetId] : null;
+    if (!targetPos) return;
+
+    const playerX = targetPos.x;
+    const playerY = height - THEME.PLAYER.BOTTOM_OFFSET; 
     
     ctx.beginPath();
     ctx.moveTo(pos.x, pos.y);
@@ -224,7 +214,7 @@ export const drawEnemies = ({
   ctx, width, height, 
   enemies, players, 
   visualStateRef, damageTimersRef, deathTimersRef, attackTimersRef,
-  currentTarget, time, onHitZoneUpdate 
+  currentTarget, time, onHitZoneUpdate, playerPositions 
 }) => {
   const centerX = width / 2;
   const centerY = height * 0.35;
@@ -245,7 +235,7 @@ export const drawEnemies = ({
     const wireframeSize = uiSize * THEME.ENEMY.SCALE_WIRE; 
     nextHitZones[enemy.id] = { x: pos.x, y: pos.y, r: wireframeSize * THEME.ENEMY.HIT_RADIUS }; 
     
-    if (isFiring) drawLaser(ctx, pos, attackTimer, width, height, players);
+    if (isFiring) drawLaser(ctx, pos, attackTimer, width, height, players, playerPositions);
     
     const isTargeted = currentTarget === enemy.id;
     drawEnemyWireframe(ctx, enemy, pos, uiSize, wireframeSize, time, isTargeted, isDamaged, isFiring, isCharging);
@@ -254,24 +244,15 @@ export const drawEnemies = ({
   onHitZoneUpdate(nextHitZones);
 };
 
-// --- UPDATED: DRAW PLAYERS WITH SCALING ---
-export const drawPlayers = ({ ctx, width, height, players, visualSeed, time, uiScale = 1 }) => {
+// --- UPDATED: DRAW PLAYERS WITH FLUID LAYOUT ---
+export const drawPlayers = ({ ctx, width, height, players, visualSeed, time, uiScale = 1, playerPositions = {} }) => {
     const { 
-        WIDTH, GAP, BOTTOM_OFFSET, BASE_SIZE, ROTATION_SPEED, 
+        BOTTOM_OFFSET, BASE_SIZE, ROTATION_SPEED, 
         FLOAT_FREQ, FLOAT_AMP, SWAY_FREQ, SWAY_AMP_X, SWAY_AMP_SCALE, 
         MAG_PRIMARY, MAG_SECONDARY 
     } = THEME.PLAYER;
     
-    // Apply UI Scale to constants
-    const sWidth = WIDTH * uiScale;
-    const sGap = GAP * uiScale;
-    const sOffset = BOTTOM_OFFSET * uiScale;
-    const sBaseSize = BASE_SIZE * uiScale;
-    const sSwayAmpX = SWAY_AMP_X * uiScale;
-
-    const numPlayers = Object.keys(players).length;
-    const totalWidth = (sWidth * numPlayers) + (sGap * (numPlayers - 1));
-    const avatarY = height - sOffset; 
+    const avatarY = height - BOTTOM_OFFSET; 
 
     const random = (modifier, totalSeed) => { 
         const x = Math.sin(totalSeed + modifier) * 10000; 
@@ -279,14 +260,19 @@ export const drawPlayers = ({ ctx, width, height, players, visualSeed, time, uiS
     };
 
     Object.values(players).forEach((player, index) => {
-        const startX = (width / 2) - (totalWidth / 2);
-        const baseScreenX = startX + (index * (sWidth + sGap)) + (sWidth / 2);
+        // Use calculated positions from Board
+        const posData = playerPositions[player.id];
+        if (!posData) return;
 
-        const swayX = Math.sin((time * SWAY_FREQ) + (index * 2.5)) * sSwayAmpX;
-        const swayScale = 1.0 + Math.cos((time * SWAY_FREQ * 1.3) + (index * 1.5)) * SWAY_AMP_SCALE;
+        const finalX = posData.x; // Center X
+        
+        // Scale visuals based on card width ratio
+        // Standard card is ~150px, if active (wide) we might scale up slightly
+        const scaleRatio = Math.min(1.3, Math.max(0.8, posData.width / 200)); 
+        const currentBaseSize = BASE_SIZE * scaleRatio;
 
-        const screenX = baseScreenX + swayX;
-        const currentBaseSize = sBaseSize * swayScale;
+        // Standard animations
+        const floatY = Math.sin((time * FLOAT_FREQ) + (index * 1.5)) * FLOAT_AMP; 
 
         const idNum = parseInt(player.id) || 0;
         const totalSeed = (idNum * 2) + visualSeed;
@@ -310,9 +296,7 @@ export const drawPlayers = ({ ctx, width, height, players, visualSeed, time, uiS
         const sRotY = sMag * (random(103, totalSeed) > 0.5 ? 1 : -1); 
         const sRotZ = sMag * (random(107, totalSeed) > 0.5 ? 1 : -1); 
 
-        const floatY = Math.sin((time * FLOAT_FREQ) + (index * 1.5)) * FLOAT_AMP; 
-
-        drawCoreGlow(ctx, screenX, avatarY + floatY, currentBaseSize, mainColor);
+        drawCoreGlow(ctx, finalX, avatarY + floatY, currentBaseSize, mainColor);
 
         const renderShape = (vertices, faces, sx, sy, sz, scale, color, isSecondary, strokeColor) => {
             const angleX = time * ROTATION_SPEED * sx; 
@@ -323,7 +307,7 @@ export const drawPlayers = ({ ctx, width, height, players, visualSeed, time, uiS
             
             const transformed = rotateVertices(vertices, angleX, angleY, angleZ);
             const projected = transformed.map(v => ({
-                x: screenX + v.x * renderSize,
+                x: finalX + v.x * renderSize,
                 y: avatarY + v.y * renderSize + floatY
             }));
             

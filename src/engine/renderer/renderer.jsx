@@ -3,7 +3,7 @@ import { NUM_PARTICLES, TARGET_FPS, Particle, FloatingText, THEME } from '../../
 import { audio } from '../audio/audio';
 
 // NEW MODULAR IMPORTS
-import { project3D } from './renderHelpers';
+import { project3D, lerp } from './renderHelpers';
 import { drawBackground, drawStars } from './layers/BackgroundLayer';
 import { drawGrid } from './layers/EnvironmentLayer';
 import { drawEnemies, drawPlayers } from './layers/EntityLayer';
@@ -25,7 +25,8 @@ export const TunnelRenderer = React.memo(({
   onEnemyHover = () => {}, 
   onBackgroundClick = () => {}, 
   attackMode = false,
-  uiScale = 1 // NEW PROP
+  uiScale = 1, 
+  playerPositions = {} 
 }) => {
   const canvasRef = useRef(null);
   
@@ -47,16 +48,19 @@ export const TunnelRenderer = React.memo(({
   const targetedEnemyRef = useRef(targetedEnemy);
   const activeEntityRef = useRef(activeEntity);
   const isWarpingRef = useRef(isWarping);
-  const lastActiveEnemyRef = useRef(null);
-  const uiScaleRef = useRef(uiScale); // Track scale ref for animation loop
+  const lastActiveEnemyRef = useRef(null); // <--- RESTORED THIS LINE
+  const uiScaleRef = useRef(uiScale); 
+  const playerPositionsRef = useRef(playerPositions); 
   
+  // NEW: Store current visual positions for lerping (Slide vs Snap)
+  const currentPositionsRef = useRef({}); 
+
   const damageTimers = useRef({}); 
   const deathTimers = useRef({}); 
   const pendingDamageRef = useRef({}); 
   const displayedCritsRef = useRef({}); 
   const attackTimers = useRef({}); 
 
-  // PERFORMANCE FIX: State for speech typing kept in Ref to avoid React re-renders
   const speechState = useRef({
       activeId: null,
       fullText: '',
@@ -66,10 +70,9 @@ export const TunnelRenderer = React.memo(({
       completeTimer: null
   });
 
-  // Update Ref when prop changes
-  useEffect(() => {
-      uiScaleRef.current = uiScale;
-  }, [uiScale]);
+  // Update Refs when props change
+  useEffect(() => { uiScaleRef.current = uiScale; }, [uiScale]);
+  useEffect(() => { playerPositionsRef.current = playerPositions; }, [playerPositions]);
 
   useEffect(() => {
     if (depth !== prevDepthRef.current) {
@@ -126,7 +129,6 @@ export const TunnelRenderer = React.memo(({
   useEffect(() => { activeEntityRef.current = activeEntity; }, [activeEntity]);
   useEffect(() => { isWarpingRef.current = isWarping; }, [isWarping]);
 
-  // Update Speech State when props change
   useEffect(() => {
       if (speakingId !== speechState.current.activeId || speechText !== speechState.current.fullText) {
           speechState.current = {
@@ -209,6 +211,23 @@ export const TunnelRenderer = React.memo(({
       
       timeRef.current += safeDt * 1.2 * warpFactor;
 
+      // --- LERP VISUAL POSITIONS ---
+      const targets = playerPositionsRef.current;
+      const current = currentPositionsRef.current;
+      const lerpFactor = 0.1; 
+
+      Object.keys(targets).forEach(id => {
+          if (!current[id]) {
+              current[id] = { ...targets[id] }; 
+          } else {
+              current[id].x = lerp(current[id].x, targets[id].x, lerpFactor);
+              current[id].width = lerp(current[id].width, targets[id].width, lerpFactor);
+          }
+      });
+      Object.keys(current).forEach(id => {
+          if (!targets[id]) delete current[id];
+      });
+
       drawBackground(ctx, width, height);
       drawStars(ctx, particlesRef.current, width, height, warpFactor);
       drawGrid(ctx, width, height, depth, gradientCache, timeRef.current);
@@ -223,7 +242,8 @@ export const TunnelRenderer = React.memo(({
           attackTimersRef: attackTimers,
           currentTarget: targetedEnemyRef.current,
           time: timeRef.current,
-          onHitZoneUpdate: (zones) => { hitZones.current = zones; }
+          onHitZoneUpdate: (zones) => { hitZones.current = zones; },
+          playerPositions: currentPositionsRef.current 
       });
 
       if (!isWarpingRef.current) {
@@ -232,20 +252,17 @@ export const TunnelRenderer = React.memo(({
               players: playersRef.current,
               visualSeed,
               time: timeRef.current,
-              uiScale: uiScaleRef.current // <--- PASS SCALE TO LAYERS
+              uiScale: uiScaleRef.current, 
+              playerPositions: currentPositionsRef.current 
           });
       }
 
-      // --- SPEECH BUBBLE LOGIC (CANVAS) ---
       const s = speechState.current;
       if (s.activeId && enemiesRef.current) {
-          // 1. Typing Logic
           const now = performance.now();
           if (s.index < s.fullText.length) {
-              // 30-70ms delay roughly
               if (now - s.lastUpdate > 40) { 
                   s.displayed += s.fullText[s.index];
-                  // Throttle audio: only play sound for non-spaces
                   if (s.fullText[s.index] !== ' ') {
                       const type = enemiesRef.current.find(e => e.id === s.activeId)?.name || 'glitch';
                       audio.speak(s.fullText[s.index], type.toLowerCase().includes('trojan') ? 'trojan' : 'glitch');
@@ -254,11 +271,9 @@ export const TunnelRenderer = React.memo(({
                   s.lastUpdate = now;
               }
           } else if (!s.completeTimer && onSpeechEnd) {
-             // Text done. Wait 1s then callback.
              s.completeTimer = setTimeout(onSpeechEnd, 1000);
           }
 
-          // 2. Drawing Logic
           const viz = visualState.current[s.activeId];
           if (viz) {
              const idleOffset = Math.sin(timeRef.current * THEME.ENEMY.IDLE_FREQ + viz.idlePhase) * THEME.ENEMY.IDLE_AMP;
@@ -293,19 +308,9 @@ export const TunnelRenderer = React.memo(({
       Object.values(playersRef.current).forEach((player, index) => {
           const pending = pendingDamageRef.current[player.id];
           if (pending) {
-              const { WIDTH, GAP } = THEME.PLAYER;
-              // Scale calculation for Floating Text too
-              const scale = uiScaleRef.current;
-              const totalWidth = (WIDTH * Object.keys(playersRef.current).length) + (GAP * (Object.keys(playersRef.current).length - 1));
-              // Note: This Floating Text logic for players is still static/approximate. 
-              // Ideally it should use the same calc as drawPlayers.
-              // For now, we'll leave it as is or apply simple scaling if needed.
-              
-              // Recalc for accurate text placement
-              const totalWidthScaled = totalWidth * scale;
-              const startX = (width / 2) - (totalWidthScaled / 2);
-              const screenX = startX + (index * (WIDTH * scale + GAP * scale)) + (WIDTH * scale / 2);
-              const screenY = height - (220 * scale); // Scaled offset
+              const posData = currentPositionsRef.current[player.id];
+              const screenX = posData ? posData.x : (width / 2);
+              const screenY = height - THEME.PLAYER.BOTTOM_OFFSET;
               
               floatingTextsRef.current.push(new FloatingText(screenX, screenY, `${pending.val}`, '#ff0000'));
               const critKey = `${player.id}_${now}`;
@@ -353,5 +358,6 @@ export const TunnelRenderer = React.memo(({
            prev.players === next.players &&
            prev.attackMode === next.attackMode &&
            prev.visualSeed === next.visualSeed &&
-           prev.uiScale === next.uiScale; // Include uiScale in prop comparison
+           prev.uiScale === next.uiScale && 
+           prev.playerPositions === next.playerPositions; 
 });

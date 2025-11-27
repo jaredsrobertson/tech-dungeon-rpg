@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { audio } from '../engine/audio/audio';
 import { AudioSystem } from '../engine/audio/AudioSystem';
-import { PlayerIcon, IconAttack, IconDefend } from './components';
+import { PlayerIcon, IconAttack, IconDefend, IconInfo, IconSpecial1, IconSpecial2 } from './components';
 import { TunnelRenderer } from '../engine/renderer/renderer';
 import { CLASSES, generateGlitchText, THEME } from '../game/constants';
+import { useFluidLayout } from '../hooks/useFluidLayout'; // Import new hook
 
 export function KernelBoard({ G, moves, playerID }) {
   // --- 1. STATE HOOKS ---
@@ -18,10 +19,9 @@ export function KernelBoard({ G, moves, playerID }) {
   const [speakingId, setSpeakingId] = useState(null);
   const [currentSpeech, setCurrentSpeech] = useState('');
   
-  // NEW: Dynamic Scale State
-  const [uiScale, setUiScale] = useState(1);
+  // NEW: Use the hook for layout logic
+  const { positions: playerPositions, uiScale, isTooSmall } = useFluidLayout(G.players, G.activeEntity);
 
-  // Track previous phase to detect transitions
   const prevPhaseRef = useRef(G.phase);
 
   // --- 2. MEMOIZED DATA ---
@@ -35,23 +35,6 @@ export function KernelBoard({ G, moves, playerID }) {
   }, [G.players, G.enemies]);
 
   // --- 3. CALLBACKS & EFFECTS ---
-  
-  // NEW: Handle Resize Scaling
-  useEffect(() => {
-      const handleResize = () => {
-          const width = window.innerWidth;
-          const baseWidth = 1600; // Ideal design width
-          // Scale down if smaller than base, cap at 1.0
-          const newScale = Math.min(1, width / baseWidth); 
-          setUiScale(newScale);
-      };
-      
-      window.addEventListener('resize', handleResize);
-      handleResize(); // Init
-      
-      return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
   const handleNewGame = () => {
       audio.init();
       setGameStarted(true);
@@ -74,7 +57,6 @@ export function KernelBoard({ G, moves, playerID }) {
       }
   };
 
-  // Lobby Card Click Handler (Toggle Logic)
   const handleCardClick = (classID, isClaimed, isMine) => {
       if (!isClaimed) {
           audio.blip();
@@ -173,6 +155,20 @@ export function KernelBoard({ G, moves, playerID }) {
   }, [G.activeEntity, G.phase]);
 
   // --- 4. CONDITIONAL RENDER LOGIC ---
+
+  // Mobile / Too Small Block
+  if (isTooSmall) {
+      return (
+          <div className="title-container" style={{textAlign:'center', padding:'20px'}}>
+              <h1 style={{color:'#cc0044', fontSize:'2rem', marginBottom:'20px'}}>SYSTEM REQUIREMENTS NOT MET</h1>
+              <p style={{color:'#ccc', fontFamily:'monospace'}}>
+                  DISPLAY TERMINAL TOO NARROW.<br/>
+                  PLEASE EXPAND VIEWPORT OR ROTATE DEVICE.<br/>
+                  MIN WIDTH: 768px
+              </p>
+          </div>
+      );
+  }
 
   if (!gameStarted) {
       return (
@@ -309,7 +305,8 @@ export function KernelBoard({ G, moves, playerID }) {
         onEnemyHover={setHoveredEnemy}
         onBackgroundClick={() => setAttackMode(false)}
         attackMode={attackMode}
-        uiScale={uiScale} // <--- PASSING SCALE TO RENDERER
+        uiScale={uiScale}
+        playerPositions={playerPositions} 
       />
       
       <div style={{position:'fixed', top:0, left:0, width:'100%', padding:'20px', display:'flex', justifyContent:'flex-end', zIndex:10000, pointerEvents:'none'}}>
@@ -330,14 +327,11 @@ export function KernelBoard({ G, moves, playerID }) {
 
       {!isWarping && (
         <div style={{ 
-            position: 'fixed', bottom: '10px', width: '100%', 
-            display: 'flex', justifyContent: 'center', 
-            gap: `${THEME.PLAYER.GAP}px`, 
+            position: 'fixed', bottom: '10px', 
+            width: '100%', 
+            height: `${THEME.PLAYER.CARD_HEIGHT_BASE}px`,
             zIndex: 10000,
-            // NEW: Apply dynamic scaling to the UI container
-            transform: `scale(${uiScale})`,
-            transformOrigin: 'bottom center',
-            pointerEvents: 'none' // Container passes events through...
+            pointerEvents: 'none'
         }}>
             {Object.values(G.players).map(player => {
                 const isActive = G.activeEntity === player.id;
@@ -348,92 +342,113 @@ export function KernelBoard({ G, moves, playerID }) {
                 const standardGreen = '#00FF41';
                 const cardBorderColor = isActive ? standardGreen : '#004411';
                 const cardTextColor = isActive ? primary : '#888'; 
-                const cardShadow = isActive ? `0 0 15px ${standardGreen}` : 'none';
+                const cardShadow = isActive ? `0 0 20px ${standardGreen}` : 'none';
+
+                // Get layout from hook data
+                const layout = playerPositions[player.id] || { left: 0, width: 100 };
 
                 const btnStyle = {
                     flex: 1, border: `1px solid ${dim}`, background: 'transparent',
                     color: '#888', 
                     cursor: 'pointer', transition: 'all 0.2s',
                     height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    padding: 0
+                    padding: 0,
+                    borderRadius: '2px'
                 };
                 
                 const activeBtnStyle = { ...btnStyle, background: primary, color: '#000', border: `1px solid ${primary}` };
 
                 return (
-                    <div key={player.id} style={{ position: 'relative', pointerEvents: 'auto' }}> {/* Children are interactive */}
+                    <div key={player.id} style={{ 
+                        position: 'absolute', 
+                        left: `${layout.left}px`, 
+                        width: `${layout.width}px`, 
+                        height: '100%',
+                        pointerEvents: 'auto',
+                        transition: 'all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)' // Smooth layout animation
+                    }}>
                         <div style={{ 
-                            width: `${THEME.PLAYER.WIDTH}px`, 
-                            height: '90px', 
-                            background: 'rgba(5, 5, 5, 0.85)', 
+                            width: '100%', height: '100%', 
+                            background: 'rgba(5, 5, 5, 0.9)', 
                             border: `1px solid ${cardBorderColor}`,
-                            display: 'flex', alignItems: 'center',
+                            display: 'flex', flexDirection: 'column',
                             boxShadow: cardShadow,
-                            transition: 'all 0.3s ease'
+                            overflow: 'hidden',
+                            borderRadius: '4px'
                         }}>
+                            {/* Top Bar: Icon, Name, Expand */}
                             <div style={{ 
-                                width: '60px', height: '100%', padding: '2px',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                background: 'rgba(0,0,0,0.3)'
+                                display: 'flex', alignItems: 'center', 
+                                padding: '5px 8px', background: 'rgba(0,0,0,0.3)',
+                                borderBottom: '1px solid #222',
+                                height: '40px'
                             }}>
-                                <PlayerIcon classID={player.classID} size={45} />
+                                <div style={{ marginRight: '10px' }}><PlayerIcon classID={player.classID} size={28} /></div>
+                                <span style={{ 
+                                    color: cardTextColor, fontWeight: 'bold', fontSize: '0.8rem', 
+                                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', 
+                                    flex: 1 
+                                }}>
+                                    {player.name}
+                                </span>
+                                <button style={{
+                                    background:'transparent', border:'none', color:'#666', cursor:'pointer',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                }} title="Info">
+                                    <IconInfo />
+                                </button>
                             </div>
 
-                            <div style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                <div style={{ 
-                                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
-                                    padding: '0 8px', borderBottom: '1px solid #222' 
-                                }}>
-                                    <span style={{ 
-                                        color: cardTextColor, fontWeight: 'bold', fontSize: '0.75rem', 
-                                        letterSpacing: '0px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '80px'
-                                    }}>
-                                        {player.name}
-                                    </span>
+                            {/* Vitals: HP and XP */}
+                            <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {/* HP Bar - Prominent */}
+                                <div style={{ width: '100%', height: '14px', background: '#1a0505', position: 'relative', border: '1px solid #333' }}>
                                     <div style={{ 
-                                        width: '60px', height: '14px', background: '#002200', position: 'relative',
-                                        border: `1px solid ${standardGreen}`
+                                        width: `${(player.hp / player.maxHp) * 100}%`, height: '100%', 
+                                        background: player.hp < 30 ? '#ff0044' : '#00ff41', 
+                                        transition: 'width 0.3s' 
+                                    }} />
+                                    <div style={{
+                                        position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: '0.65rem', fontWeight: '900', color: '#fff', textShadow: '0 0 2px #000', pointerEvents:'none'
                                     }}>
-                                        <div style={{ 
-                                            width: `${(player.hp / player.maxHp) * 100}%`, height: '100%', 
-                                            background: standardGreen, transition: 'width 0.3s' 
-                                        }} />
-                                        <div style={{
-                                            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                            fontSize: '0.7rem', fontWeight: '900', color: '#fff', textShadow: '0 0 3px #000', pointerEvents:'none'
-                                        }}>
-                                            {player.hp}
-                                        </div>
+                                        {player.hp} / {player.maxHp}
                                     </div>
                                 </div>
-
-                                <div style={{ flex: 1, display: 'flex', padding: '6px 8px', gap: '6px' }}>
-                                    {isActive && !speakingId ? (
-                                        <div style={{ width: '100%', display: 'flex', gap: '6px' }}>
-                                            <button 
-                                                style={attackMode ? activeBtnStyle : btnStyle}
-                                                onClick={() => { audio.blip(); setAttackMode(!attackMode); }}
-                                                title="ATTACK"
-                                            >
-                                                <IconAttack />
-                                            </button>
-                                            <button 
-                                                style={btnStyle}
-                                                onClick={() => moves.defend()}
-                                                onMouseEnter={(e) => {e.currentTarget.style.color = primary; e.currentTarget.style.border = `1px solid ${primary}`}}
-                                                onMouseLeave={(e) => {e.currentTarget.style.color = '#888'; e.currentTarget.style.border = `1px solid ${dim}`}}
-                                                title="DEFEND"
-                                            >
-                                                <IconDefend />
-                                            </button>
-                                        </div>
-                                    ) : (
-                                        <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', color: '#444', letterSpacing: '1px' }}>
-                                            {speakingId ? 'DATA...' : 'WAIT...'}
-                                        </div>
-                                    )}
+                                {/* XP Bar - Thin */}
+                                <div style={{ width: '100%', height: '4px', background: '#001122', position: 'relative' }}>
+                                    <div style={{ width: '45%', height: '100%', background: '#0088aa' }} />
                                 </div>
                             </div>
+
+                            {/* Action Row - Only visible when active */}
+                            {isActive && (
+                                <div style={{ 
+                                    flex: 1, display: 'flex', gap: '8px', padding: '0 10px 10px 10px', 
+                                    animation: 'fade-in 0.5s' 
+                                }}>
+                                    <button 
+                                        style={attackMode ? activeBtnStyle : btnStyle}
+                                        onClick={() => { audio.blip(); setAttackMode(!attackMode); }}
+                                        title="ATTACK"
+                                    >
+                                        <IconAttack />
+                                    </button>
+                                    <button 
+                                        style={btnStyle}
+                                        onClick={() => moves.defend()}
+                                        title="DEFEND"
+                                    >
+                                        <IconDefend />
+                                    </button>
+                                    <button style={{ ...btnStyle, borderColor: '#333', color: '#444' }} disabled>
+                                        <IconSpecial1 />
+                                    </button>
+                                    <button style={{ ...btnStyle, borderColor: '#333', color: '#444' }} disabled>
+                                        <IconSpecial2 />
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 );
