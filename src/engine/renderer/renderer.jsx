@@ -1,20 +1,12 @@
-import React, { useEffect, useRef } from 'react';
-import { NUM_PARTICLES, TARGET_FPS, Particle, FloatingText, THEME } from '../../game/constants';
+import React, { useEffect, useRef, useLayoutEffect } from 'react';
 import { audio } from '../audio/audio';
-
-// NEW MODULAR IMPORTS
-import { project3D, lerp } from './renderHelpers';
-import { drawBackground, drawStars } from './layers/BackgroundLayer';
-import { drawGrid } from './layers/EnvironmentLayer';
-import { drawEnemies, drawPlayers } from './layers/EntityLayer';
-import { drawFloatingText, drawSpeechBubble } from './layers/EffectLayer';
+import { drawFrame } from './RenderLoop';
 
 export const TunnelRenderer = React.memo(({ 
   enemies = [], 
   players = {}, 
   targetedEnemy = null, 
   activeEntity = null, 
-  isTransitioning = false, 
   isWarping = false, 
   depth = 1, 
   visualSeed = 0, 
@@ -29,119 +21,126 @@ export const TunnelRenderer = React.memo(({
   playerPositions = {} 
 }) => {
   const canvasRef = useRef(null);
-  
-  const particlesRef = useRef([]); 
-  const floatingTextsRef = useRef([]); 
-  
   const animationFrameRef = useRef(null);
-  const timeRef = useRef(0);       
-  const prevTimeRef = useRef(0);   
-  
-  const hitZones = useRef({}); 
-  const visualState = useRef({});
-  const gradientCache = useRef([]);
+  const prevTimeRef = useRef(0);
   const lastHoveredRef = useRef(null);
-
-  const enemiesRef = useRef(enemies);
-  const playersRef = useRef(players); 
-  const prevDepthRef = useRef(depth); 
-  const targetedEnemyRef = useRef(targetedEnemy);
-  const activeEntityRef = useRef(activeEntity);
-  const isWarpingRef = useRef(isWarping);
-  const lastActiveEnemyRef = useRef(null); // <--- RESTORED THIS LINE
-  const uiScaleRef = useRef(uiScale); 
-  const playerPositionsRef = useRef(playerPositions); 
   
-  // NEW: Store current visual positions for lerping (Slide vs Snap)
-  const currentPositionsRef = useRef({}); 
+  // FIX: Track the last enemy to act, so we know who attacked even after turn ends
+  const lastActiveEnemyRef = useRef(null);
 
-  const damageTimers = useRef({}); 
-  const deathTimers = useRef({}); 
-  const pendingDamageRef = useRef({}); 
-  const displayedCritsRef = useRef({}); 
-  const attackTimers = useRef({}); 
+  // --- SINGLE SOURCE OF TRUTH FOR RENDER LOOP ---
+  const renderState = useRef({
+    time: 0,
+    depth: 1,
+    isWarping: false,
+    enemies: [],
+    players: {},
+    playerPositions: {},
+    currentPositions: {}, // For lerping
+    visualState: {},      // For enemy 3D positions
+    gradientCache: [],    // Optimization for grid
+    particles: [],
+    hitZones: {},
+    floatingTexts: [],
+    
+    // Combat State
+    damageTimers: {},
+    deathTimers: {},
+    attackTimers: {},
+    pendingDamage: {},
+    displayedCrits: {},
+    
+    // Speech State
+    speech: {
+        activeId: null,
+        fullText: '',
+        displayed: '',
+        index: 0,
+        lastUpdate: 0
+    },
 
-  const speechState = useRef({
-      activeId: null,
-      fullText: '',
-      displayed: '',
-      index: 0,
-      lastUpdate: 0,
-      completeTimer: null
+    // UI Props
+    targetedEnemy: null,
+    uiScale: 1
   });
 
-  // Update Refs when props change
-  useEffect(() => { uiScaleRef.current = uiScale; }, [uiScale]);
-  useEffect(() => { playerPositionsRef.current = playerPositions; }, [playerPositions]);
+  // --- SYNC PROPS TO RENDER STATE ---
+  useLayoutEffect(() => {
+    const s = renderState.current;
 
-  useEffect(() => {
-    if (depth !== prevDepthRef.current) {
-        prevDepthRef.current = depth;
-        visualState.current = {}; 
-        hitZones.current = {};
-        pendingDamageRef.current = {};
-        damageTimers.current = {};
-        deathTimers.current = {};
-        displayedCritsRef.current = {}; 
-        floatingTextsRef.current = [];
-        attackTimers.current = {};
+    // Reset visuals if depth changes
+    if (depth !== s.depth) {
+        s.visualState = {}; 
+        s.hitZones = {};
+        s.pendingDamage = {};
+        s.damageTimers = {};
+        s.deathTimers = {};
+        s.displayedCrits = {}; 
+        s.floatingTexts = [];
+        s.attackTimers = {};
+        s.gradientCache = []; // Clear grid cache
     }
+    s.depth = depth;
 
-    if (activeEntity && activeEntity.startsWith('e')) {
-        lastActiveEnemyRef.current = activeEntity;
-    }
-
+    // Detect Damage (Diffing Logic)
     enemies.forEach(enemy => {
-      const oldEnemy = enemiesRef.current.find(e => e.id === enemy.id);
-      
-      if (oldEnemy && enemy.hp < oldEnemy.hp) {
-          damageTimers.current[enemy.id] = performance.now();
-          pendingDamageRef.current[enemy.id] = { val: oldEnemy.hp - enemy.hp };
-          audio.enemyDamaged(); 
-      }
-      if (enemy.hp <= 0 && oldEnemy && oldEnemy.hp > 0) {
-          deathTimers.current[enemy.id] = performance.now();
-          audio.enemyDeath(); 
-      }
+        const oldEnemy = s.enemies.find(e => e.id === enemy.id);
+        if (oldEnemy && enemy.hp < oldEnemy.hp) {
+            s.damageTimers[enemy.id] = performance.now();
+            s.pendingDamage[enemy.id] = { val: oldEnemy.hp - enemy.hp };
+            audio.enemyDamaged(); 
+        }
+        if (enemy.hp <= 0 && oldEnemy && oldEnemy.hp > 0) {
+            s.deathTimers[enemy.id] = performance.now();
+            audio.enemyDeath(); 
+        }
     });
-    enemiesRef.current = enemies;
-  }, [enemies, depth, activeEntity]);
 
-  useEffect(() => {
     Object.values(players).forEach(player => {
-        const prevPlayers = playersRef.current || {}; 
-        const prev = prevPlayers[player.id];
+        const prev = s.players[player.id];
         if (prev && prev.hp > 0 && player.hp < prev.hp) {
-            damageTimers.current[player.id] = performance.now();
-            pendingDamageRef.current[player.id] = { val: prev.hp - player.hp }; 
+            s.damageTimers[player.id] = performance.now();
+            s.pendingDamage[player.id] = { val: prev.hp - player.hp }; 
             audio.playerDamaged(); 
+            
+            // FIX: Use the tracked enemy ID instead of the current activeEntity
             const attackerId = lastActiveEnemyRef.current;
             if (attackerId) {
-                attackTimers.current[attackerId] = { targetId: player.id, start: performance.now() };
+                s.attackTimers[attackerId] = { targetId: player.id, start: performance.now() };
             }
         }
         if (prev && prev.hp > 0 && player.hp === 0) { audio.playerDeath(); }
     });
-    playersRef.current = players;
-  }, [players]);
 
-  useEffect(() => { targetedEnemyRef.current = targetedEnemy; }, [targetedEnemy]);
-  useEffect(() => { activeEntityRef.current = activeEntity; }, [activeEntity]);
-  useEffect(() => { isWarpingRef.current = isWarping; }, [isWarping]);
+    // Update State
+    s.enemies = enemies;
+    s.players = players;
+    s.playerPositions = playerPositions;
+    s.isWarping = isWarping;
+    s.targetedEnemy = targetedEnemy;
+    s.uiScale = uiScale;
+    s.visualSeed = visualSeed; // For randomizing player shapes
 
+    // Update Speech
+    if (speakingId !== s.speech.activeId || speechText !== s.speech.fullText) {
+        s.speech = {
+            activeId: speakingId,
+            fullText: speechText,
+            displayed: '',
+            index: 0,
+            lastUpdate: performance.now()
+        };
+    }
+  }, [enemies, players, playerPositions, isWarping, depth, targetedEnemy, uiScale, activeEntity, speakingId, speechText, visualSeed]);
+
+  // FIX: Update the tracker *after* the render logic
   useEffect(() => {
-      if (speakingId !== speechState.current.activeId || speechText !== speechState.current.fullText) {
-          speechState.current = {
-              activeId: speakingId,
-              fullText: speechText,
-              displayed: '',
-              index: 0,
-              lastUpdate: performance.now(),
-              completeTimer: null
-          };
+      if (activeEntity && activeEntity.startsWith('e')) {
+          lastActiveEnemyRef.current = activeEntity;
       }
-  }, [speakingId, speechText]);
+  }, [activeEntity]);
 
+  // --- INTERACTION HANDLERS ---
   const handleCanvasMouseMove = (e) => {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
@@ -149,13 +148,17 @@ export const TunnelRenderer = React.memo(({
       const my = e.clientY - rect.top;
       
       let foundId = null;
-      const ids = Object.keys(hitZones.current);
+      const zones = renderState.current.hitZones;
+      const ids = Object.keys(zones);
+      
+      // Iterate backwards (draw order)
       for (let i = ids.length - 1; i >= 0; i--) {
           const id = ids[i];
-          const zone = hitZones.current[id];
-          const dist = Math.sqrt(Math.pow(mx - zone.x, 2) + Math.pow(my - zone.y, 2));
+          const zone = zones[id];
+          const dist = Math.hypot(mx - zone.x, my - zone.y);
           if (dist <= zone.r) { foundId = id; break; }
       }
+      
       document.body.style.cursor = foundId ? (attackMode ? 'crosshair' : 'pointer') : 'default';
       
       if (foundId !== lastHoveredRef.current) {
@@ -169,195 +172,77 @@ export const TunnelRenderer = React.memo(({
       const rect = canvasRef.current.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
+      
+      const zones = renderState.current.hitZones;
+      const ids = Object.keys(zones);
       let hit = false;
-      const ids = Object.keys(hitZones.current);
+
       for (let i = ids.length - 1; i >= 0; i--) {
           const id = ids[i];
-          const zone = hitZones.current[id];
-          const dist = Math.sqrt(Math.pow(mx - zone.x, 2) + Math.pow(my - zone.y, 2));
-          if (dist <= zone.r) { onEnemyClick(id); hit = true; break; }
+          const zone = zones[id];
+          const dist = Math.hypot(mx - zone.x, my - zone.y);
+          if (dist <= zone.r) { 
+              onEnemyClick(id); 
+              hit = true; 
+              break; 
+          }
       }
       if (!hit) onBackgroundClick();
   };
 
+  // --- RENDER LOOP ---
   useEffect(() => {
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true }); 
+    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
 
     const resize = () => {
-      const dpr = 0.75; 
+      const dpr = 0.75; // Low Res for aesthetic/perf
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
       canvas.style.width = `${window.innerWidth}px`;
       canvas.style.height = `${window.innerHeight}px`;
       ctx.scale(dpr, dpr);
-      
-      if (particlesRef.current.length === 0) {
-          particlesRef.current = Array.from({ length: NUM_PARTICLES }, () => new Particle(window.innerWidth, window.innerHeight));
-      }
-      gradientCache.current = [];
+      renderState.current.gradientCache = []; // Reset gradients on resize
     };
 
-    const draw = (timestamp) => {
-      animationFrameRef.current = requestAnimationFrame(draw);
+    const loop = (timestamp) => {
       if (!prevTimeRef.current) prevTimeRef.current = timestamp;
       const dt = (timestamp - prevTimeRef.current) / 1000;
       prevTimeRef.current = timestamp;
-      const safeDt = Math.min(dt, 0.1);
 
-      const width = canvas.clientWidth;
-      const height = canvas.clientHeight;
-      const warpFactor = isWarpingRef.current ? 10 : 1; 
+      const width = canvas.width / 0.75;  // Unscale width for logic
+      const height = canvas.height / 0.75;
+
+      drawFrame(ctx, width, height, dt, renderState.current);
       
-      timeRef.current += safeDt * 1.2 * warpFactor;
-
-      // --- LERP VISUAL POSITIONS ---
-      const targets = playerPositionsRef.current;
-      const current = currentPositionsRef.current;
-      const lerpFactor = 0.1; 
-
-      Object.keys(targets).forEach(id => {
-          if (!current[id]) {
-              current[id] = { ...targets[id] }; 
-          } else {
-              current[id].x = lerp(current[id].x, targets[id].x, lerpFactor);
-              current[id].width = lerp(current[id].width, targets[id].width, lerpFactor);
-          }
-      });
-      Object.keys(current).forEach(id => {
-          if (!targets[id]) delete current[id];
-      });
-
-      drawBackground(ctx, width, height);
-      drawStars(ctx, particlesRef.current, width, height, warpFactor);
-      drawGrid(ctx, width, height, depth, gradientCache, timeRef.current);
-
-      drawEnemies({
-          ctx, width, height,
-          enemies: enemiesRef.current,
-          players: playersRef.current,
-          visualStateRef: visualState,
-          damageTimersRef: damageTimers,
-          deathTimersRef: deathTimers,
-          attackTimersRef: attackTimers,
-          currentTarget: targetedEnemyRef.current,
-          time: timeRef.current,
-          onHitZoneUpdate: (zones) => { hitZones.current = zones; },
-          playerPositions: currentPositionsRef.current 
-      });
-
-      if (!isWarpingRef.current) {
-          drawPlayers({
-              ctx, width, height,
-              players: playersRef.current,
-              visualSeed,
-              time: timeRef.current,
-              uiScale: uiScaleRef.current, 
-              playerPositions: currentPositionsRef.current 
-          });
-      }
-
-      const s = speechState.current;
-      if (s.activeId && enemiesRef.current) {
-          const now = performance.now();
-          if (s.index < s.fullText.length) {
-              if (now - s.lastUpdate > 40) { 
-                  s.displayed += s.fullText[s.index];
-                  if (s.fullText[s.index] !== ' ') {
-                      const type = enemiesRef.current.find(e => e.id === s.activeId)?.name || 'glitch';
-                      audio.speak(s.fullText[s.index], type.toLowerCase().includes('trojan') ? 'trojan' : 'glitch');
-                  }
-                  s.index++;
-                  s.lastUpdate = now;
-              }
-          } else if (!s.completeTimer && onSpeechEnd) {
-             s.completeTimer = setTimeout(onSpeechEnd, 1000);
-          }
-
-          const viz = visualState.current[s.activeId];
-          if (viz) {
-             const idleOffset = Math.sin(timeRef.current * THEME.ENEMY.IDLE_FREQ + viz.idlePhase) * THEME.ENEMY.IDLE_AMP;
-             const pos = project3D(viz.x, viz.y + idleOffset, viz.z, width / 2, height * 0.35);
-             const size = THEME.ENEMY.SCALE_UI * pos.scale;
-             drawSpeechBubble(ctx, pos.x, pos.y - size * 1.1, s.displayed);
+      // Check for speech completion
+      const s = renderState.current.speech;
+      if (s.activeId && s.index >= s.fullText.length && onSpeechEnd) {
+          if (!s.completeTriggered) {
+             s.completeTriggered = true;
+             setTimeout(onSpeechEnd, 1000);
           }
       }
 
-      const now = performance.now();
-      const centerX = width / 2;
-      const centerY = height * 0.35;
-      
-      enemiesRef.current.forEach(enemy => {
-          const pending = pendingDamageRef.current[enemy.id];
-          if (pending) {
-              const viz = visualState.current[enemy.id];
-              if (viz) {
-                  const pos = project3D(viz.x, viz.y, viz.z, centerX, centerY);
-                  const size = THEME.ENEMY.SCALE_UI * pos.scale;
-                  floatingTextsRef.current.push(new FloatingText(pos.x, pos.y - size - 40, `${pending.val}`, '#ff0000'));
-                  const critKey = `${enemy.id}_${now}`;
-                  if (enemy.lastCrit && !displayedCritsRef.current[critKey]) {
-                      floatingTextsRef.current.push(new FloatingText(pos.x, pos.y - size - 100, 'CRITICAL', '#ffff00'));
-                      displayedCritsRef.current[critKey] = true;
-                  }
-              }
-              delete pendingDamageRef.current[enemy.id];
-          }
-      });
-
-      Object.values(playersRef.current).forEach((player, index) => {
-          const pending = pendingDamageRef.current[player.id];
-          if (pending) {
-              const posData = currentPositionsRef.current[player.id];
-              const screenX = posData ? posData.x : (width / 2);
-              const screenY = height - THEME.PLAYER.BOTTOM_OFFSET;
-              
-              floatingTextsRef.current.push(new FloatingText(screenX, screenY, `${pending.val}`, '#ff0000'));
-              const critKey = `${player.id}_${now}`;
-              if (player.lastCrit && !displayedCritsRef.current[critKey]) {
-                  floatingTextsRef.current.push(new FloatingText(screenX, screenY - 60, 'CRITICAL', '#ffff00'));
-                  displayedCritsRef.current[critKey] = true;
-              }
-              delete pendingDamageRef.current[player.id];
-          }
-      });
-
-      if (floatingTextsRef.current.length > 10) {
-          floatingTextsRef.current = floatingTextsRef.current.filter(ft => ft.life > 0).slice(-10);
-      }
-      floatingTextsRef.current = floatingTextsRef.current.filter(ft => ft.life > 0);
-
-      drawFloatingText(ctx, floatingTextsRef.current);
+      animationFrameRef.current = requestAnimationFrame(loop);
     };
 
     resize();
     window.addEventListener('resize', resize);
-    animationFrameRef.current = requestAnimationFrame(draw);
+    animationFrameRef.current = requestAnimationFrame(loop);
     
     return () => { 
         window.removeEventListener('resize', resize); 
         if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-        particlesRef.current = [];
-        floatingTextsRef.current = [];
-        gradientCache.current = [];
     };
-  }, [visualSeed]); 
+  }, [onSpeechEnd]);
 
   return (
-      <canvas ref={canvasRef} onClick={handleCanvasClick} onMouseMove={handleCanvasMouseMove} style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 0 }} />
+      <canvas 
+        ref={canvasRef} 
+        onClick={handleCanvasClick} 
+        onMouseMove={handleCanvasMouseMove} 
+        style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 0 }} 
+      />
   );
-}, (prev, next) => {
-    return prev.depth === next.depth &&
-           prev.isWarping === next.isWarping &&
-           prev.targetedEnemy === next.targetedEnemy &&
-           prev.activeEntity === next.activeEntity &&
-           prev.isTransitioning === next.isTransitioning &&
-           prev.speakingId === next.speakingId &&
-           prev.speechText === next.speechText &&
-           prev.enemies === next.enemies &&
-           prev.players === next.players &&
-           prev.attackMode === next.attackMode &&
-           prev.visualSeed === next.visualSeed &&
-           prev.uiScale === next.uiScale && 
-           prev.playerPositions === next.playerPositions; 
 });

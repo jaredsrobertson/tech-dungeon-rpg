@@ -1,24 +1,26 @@
 // src/engine/audio/AudioSystem.jsx
 import { useEffect, useRef } from 'react';
-import { audio } from './audio'; // Import from sibling file
+import { audio } from './audio'; 
 
 export const AudioSystem = ({ G }) => {
   const lastEventId = useRef(0);
   const victoryPlayed = useRef(false);
 
   useEffect(() => {
-    // Check if a new event has occurred
     if (G.lastEvent && G.lastEvent.id !== lastEventId.current) {
       const event = G.lastEvent;
       lastEventId.current = event.id;
 
-      // Map Event Type -> Audio Action
       switch (event.type) {
         case 'PLAYER_ATTACK':
           audio.playerAttack(event.isCrit);
           break;
         case 'ENEMY_ATTACK':
           audio.enemyAttack();
+          break;
+        // ADDED: New case for charging sound
+        case 'ENEMY_CHARGE':
+          audio.charge();
           break;
         case 'PLAYER_DEFEND':
         case 'BLOCK':
@@ -47,12 +49,11 @@ export const AudioSystem = ({ G }) => {
       }
     }
 
-    // Reset Victory flag if not in victory phase
     if (G.phase !== 'victory') {
       victoryPlayed.current = false;
     }
 
   }, [G.lastEvent, G.phase]);
 
-  return null; // This component renders nothing visual
+  return null; 
 };

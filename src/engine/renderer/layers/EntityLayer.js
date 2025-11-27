@@ -1,8 +1,8 @@
-import { GLITCH_CHARS, SHAPES, CLASSES, THEME } from '../../../game/constants';
+import { GLITCH_CHARS, SHAPES, THEME } from '../../../game/constants';
+import { CLASSES } from '../../../game/data/classes';
 import { rotateVertices } from '../../../utils/math';
 import { project3D, drawShapeFaces, lerp } from '../renderHelpers';
 
-// ... (Keep updateVisualState, drawCoreGlow, drawDeathEffect, calculateCombatOffsets unchanged) ...
 const updateVisualState = (enemy, visualStateRef, time) => {
     let viz = visualStateRef.current[enemy.id];
     if (!viz) {
@@ -36,14 +36,17 @@ const drawDeathEffect = (ctx, enemy, deathTimersRef, visualStateRef, centerX, ce
     if (deathTimer && (now - deathTimer < 1000)) {
         const viz = visualStateRef.current[enemy.id] || enemy;
         const pos = project3D(viz.x || 0, viz.y || 0, viz.z || 300, centerX, centerY);
-        const size = 150 * pos.scale; 
-        ctx.fillStyle = '#fff';
+        
+        const size = 112.5 * pos.scale; 
+        
+        ctx.fillStyle = '#ff0000'; 
         ctx.font = `bold ${size * 0.5}px monospace`;
         const seed = enemy.id.charCodeAt(0);
+        
         for(let k=0; k<5; k++) {
             const char = GLITCH_CHARS[(seed + k) % GLITCH_CHARS.length];
-            const gx = pos.x + (Math.random()-0.5) * size * 3;
-            const gy = pos.y + (Math.random()-0.5) * size * 3;
+            const gx = pos.x + (Math.random()-0.5) * size * 1.5;
+            const gy = pos.y + (Math.random()-0.5) * size * 1.5;
             ctx.fillText(char, gx, gy);
         }
     } else if (deathTimer) { delete deathTimersRef.current[enemy.id]; }
@@ -56,26 +59,21 @@ const calculateCombatOffsets = (enemy, attackTimersRef, damageTimersRef, time, n
         if (now - attackTimer.start < 300) { isFiring = true; } 
         else { delete attackTimersRef.current[enemy.id]; }
     }
-    let surgeZ = 0, shakeX = 0, shakeY = 0, isDamaged = false;
+    
+    let damageElapsed = 0, isDamaged = false;
     const isCharging = enemy.isCharging;
-    if (isCharging || isFiring) { 
-        surgeZ = Math.sin(time * 20) * THEME.COMBAT.SURGE_Z - THEME.COMBAT.SURGE_Z; 
-        shakeX += (Math.random() - 0.5) * THEME.COMBAT.SHAKE_X; 
-    }
+    
     const damageTimer = damageTimersRef.current[enemy.id];
     if (damageTimer && (now - damageTimer < 500)) {
       isDamaged = true; 
-      shakeX = (Math.random() - 0.5) * THEME.COMBAT.DAMAGE_SHAKE; 
-      shakeY = (Math.random() - 0.5) * THEME.COMBAT.DAMAGE_SHAKE;
+      damageElapsed = now - damageTimer; 
     } else if (damageTimer) { delete damageTimersRef.current[enemy.id]; }
-    return { offsetX: shakeX, offsetY: shakeY, offsetZ: surgeZ, isDamaged, isFiring, isCharging, attackTimer };
+    
+    return { offsetX: 0, offsetY: 0, offsetZ: 0, isDamaged, damageElapsed, isFiring, isCharging, attackTimer };
 };
 
-// --- UPDATED LASER DRAWING ---
 const drawLaser = (ctx, pos, attackTimer, width, height, players, playerPositions) => {
     if (!attackTimer) return;
-    
-    // Find target position
     const targetPos = playerPositions ? playerPositions[attackTimer.targetId] : null;
     if (!targetPos) return;
 
@@ -91,15 +89,37 @@ const drawLaser = (ctx, pos, attackTimer, width, height, players, playerPosition
     ctx.stroke(); ctx.shadowBlur = 0;
 };
 
-const drawEnemyWireframe = (ctx, enemy, pos, size, wireframeSize, time, isTargeted, isDamaged, isFiring, isCharging) => {
+const drawEnemyWireframe = (ctx, enemy, pos, size, wireframeSize, time, isTargeted, isDamaged, damageElapsed, isFiring, isCharging) => {
     const baseShape = SHAPES.octahedron; 
-    let mainColor = '#ff0055';
-    if (isDamaged) mainColor = '#ffffff';
-    else if (isFiring) mainColor = '#ff0000';
-    else if (isCharging) mainColor = '#ffaa00';
     
+    let mainColor = '#ff0055'; 
+    let wireAlpha = 0.3;
+    let coreVisible = true;
+
+    // 1. Color & State Logic
+    if (isCharging) {
+        const chargePulse = (Math.sin(time * 20) + 1) / 2; 
+        mainColor = chargePulse > 0.5 ? '#ff0000' : '#ff0055';
+        wireAlpha = 0.6 + (chargePulse * 0.4); 
+    } else if (isFiring) {
+        mainColor = '#ff0000';
+        wireAlpha = 1.0;
+    }
+    
+    if (isDamaged) {
+        if (damageElapsed < 150) {
+            wireAlpha = 0.0; 
+            coreVisible = true; 
+        } else {
+            mainColor = '#ff0000'; 
+            wireAlpha = 1.0;       
+            const fade = 1 - ((damageElapsed - 150) / 350);
+            wireAlpha = Math.max(0.3, fade);
+        }
+    }
+
+    // 2. Rotation & Projection
     const hpPct = enemy.hp / enemy.maxHp;
-    const split = 1 - hpPct; 
     const seed = enemy.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
     
     const angleY = time * THEME.ENEMY.ROT_SPEED_Y + seed; 
@@ -120,57 +140,60 @@ const drawEnemyWireframe = (ctx, enemy, pos, size, wireframeSize, time, isTarget
         x: pos.x + v.x * wireframeSize, y: pos.y + v.y * wireframeSize 
     }));
     
+    // 3. Gradient Calculation (HP Fill)
     let minY = Infinity, maxY = -Infinity;
     projectedVerts.forEach(p => {
         if (p.y < minY) minY = p.y;
         if (p.y > maxY) maxY = p.y;
     });
-    const boundTop = minY;
-    const boundBot = maxY;
-    const dynamicHpGrad = ctx.createLinearGradient(0, boundTop, 0, boundBot);
-    dynamicHpGrad.addColorStop(0, '#333333'); 
-    dynamicHpGrad.addColorStop(Math.max(0, split - 0.01), '#333333');
-    dynamicHpGrad.addColorStop(Math.min(1, split + 0.01), mainColor);
-    dynamicHpGrad.addColorStop(1, mainColor);
+    if (maxY - minY < 1) maxY = minY + 1;
 
-    if (isDamaged) {
-        ctx.save();
-        ctx.globalCompositeOperation = 'screen';
-        const shake = 8;
-        ctx.save(); ctx.translate(-shake, 0);
-        drawShapeFaces(ctx, projectedVerts, backFaces, '#ff0000', 0.5, '#ff0000');
-        drawShapeFaces(ctx, projectedVerts, frontFaces, '#ff0000', 0.5, '#ff0000');
-        ctx.restore();
-        ctx.save(); ctx.translate(shake, 0);
-        drawShapeFaces(ctx, projectedVerts, backFaces, '#0000ff', 0.5, '#0000ff');
-        drawShapeFaces(ctx, projectedVerts, frontFaces, '#0000ff', 0.5, '#0000ff');
-        ctx.restore();
-        drawShapeFaces(ctx, projectedVerts, backFaces, '#00ff00', 0.5, '#00ff00');
-        drawShapeFaces(ctx, projectedVerts, frontFaces, '#00ff00', 0.5, '#00ff00');
-        ctx.restore();
-    } else {
-        drawShapeFaces(ctx, projectedVerts, backFaces, dynamicHpGrad, 0.3); 
-        ctx.save();
-        ctx.translate(pos.x, pos.y);
-        if (isTargeted) {
-            ctx.save(); ctx.rotate(time * 2); ctx.strokeStyle = '#00FFFF'; ctx.lineWidth = 2;
-            ctx.shadowBlur = 15; ctx.shadowColor = '#00FFFF';
-            const r = wireframeSize * 0.8; 
-            ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-            ctx.stroke(); ctx.restore();
-        }
+    // Gradient: Dark at top (empty), Main Color at bottom (full)
+    const split = 1 - hpPct; 
+    const hpGrad = ctx.createLinearGradient(0, minY, 0, maxY);
+    
+    // "Empty" part (Top)
+    hpGrad.addColorStop(0, '#220011'); 
+    hpGrad.addColorStop(Math.max(0, split - 0.05), '#220011');
+    // Transition
+    hpGrad.addColorStop(Math.min(1, split + 0.05), mainColor);
+    // "Filled" part (Bottom)
+    hpGrad.addColorStop(1, mainColor);
+
+    // 4. Draw Back Faces
+    if (wireAlpha > 0) {
+        drawShapeFaces(ctx, projectedVerts, backFaces, hpGrad, wireAlpha * 0.3, mainColor); 
+    }
+
+    // 5. Draw Core
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    
+    if (isTargeted) {
+        ctx.save(); ctx.rotate(time * 2); ctx.strokeStyle = '#00FFFF'; ctx.lineWidth = 2;
+        ctx.shadowBlur = 15; ctx.shadowColor = '#00FFFF';
+        const r = wireframeSize * 0.8; 
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke(); ctx.restore();
+    }
+
+    if (coreVisible) {
         const pulse = 1.0 + Math.sin(time * 8) * 0.3;
         const coreRadius = size * 0.6 * pulse;
         const coreAlpha = 0.2 + (0.7 * hpPct);
         const glowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, coreRadius);
         glowGrad.addColorStop(0, `rgba(255,255,255,${coreAlpha})`); 
-        glowGrad.addColorStop(0.4, mainColor); 
+        glowGrad.addColorStop(0.4, '#ff0055'); 
         glowGrad.addColorStop(1, 'rgba(0,0,0,0)'); 
         ctx.fillStyle = glowGrad; 
         ctx.globalAlpha = coreAlpha;
         ctx.beginPath(); ctx.arc(0, 0, coreRadius, 0, Math.PI * 2); ctx.fill();
-        ctx.restore(); 
-        drawShapeFaces(ctx, projectedVerts, frontFaces, dynamicHpGrad, 0.2);
+    }
+    ctx.restore(); 
+
+    // 6. Draw Front Faces
+    if (wireAlpha > 0) {
+        drawShapeFaces(ctx, projectedVerts, frontFaces, hpGrad, wireAlpha * 0.5, mainColor);
     }
 };
 
@@ -228,8 +251,11 @@ export const drawEnemies = ({
     }
     const viz = updateVisualState(enemy, visualStateRef, time);
     if (!viz) return;
+    
     const idleOffset = Math.sin(time * THEME.ENEMY.IDLE_FREQ + viz.idlePhase) * THEME.ENEMY.IDLE_AMP; 
-    const { offsetX, offsetY, offsetZ, isDamaged, isFiring, isCharging, attackTimer } = calculateCombatOffsets(enemy, attackTimersRef, damageTimersRef, time, now);
+    
+    const { offsetX, offsetY, offsetZ, isDamaged, damageElapsed, isFiring, isCharging, attackTimer } = calculateCombatOffsets(enemy, attackTimersRef, damageTimersRef, time, now);
+    
     const pos = project3D(viz.x + offsetX, viz.y + idleOffset + offsetY, viz.z + offsetZ, centerX, centerY);
     const uiSize = THEME.ENEMY.SCALE_UI * pos.scale; 
     const wireframeSize = uiSize * THEME.ENEMY.SCALE_WIRE; 
@@ -238,18 +264,18 @@ export const drawEnemies = ({
     if (isFiring) drawLaser(ctx, pos, attackTimer, width, height, players, playerPositions);
     
     const isTargeted = currentTarget === enemy.id;
-    drawEnemyWireframe(ctx, enemy, pos, uiSize, wireframeSize, time, isTargeted, isDamaged, isFiring, isCharging);
+    
+    drawEnemyWireframe(ctx, enemy, pos, uiSize, wireframeSize, time, isTargeted, isDamaged, damageElapsed, isFiring, isCharging);
+    
     if (isTargeted) { drawEnemyTooltip(ctx, enemy, pos, uiSize); }
   });
   onHitZoneUpdate(nextHitZones);
 };
 
-// --- UPDATED: DRAW PLAYERS WITH FLUID LAYOUT ---
 export const drawPlayers = ({ ctx, width, height, players, visualSeed, time, uiScale = 1, playerPositions = {} }) => {
     const { 
         BOTTOM_OFFSET, BASE_SIZE, ROTATION_SPEED, 
-        FLOAT_FREQ, FLOAT_AMP, SWAY_FREQ, SWAY_AMP_X, SWAY_AMP_SCALE, 
-        MAG_PRIMARY, MAG_SECONDARY 
+        FLOAT_FREQ, FLOAT_AMP, MAG_PRIMARY, MAG_SECONDARY 
     } = THEME.PLAYER;
     
     const avatarY = height - BOTTOM_OFFSET; 
@@ -260,28 +286,24 @@ export const drawPlayers = ({ ctx, width, height, players, visualSeed, time, uiS
     };
 
     Object.values(players).forEach((player, index) => {
-        // Use calculated positions from Board
         const posData = playerPositions[player.id];
         if (!posData) return;
 
-        const finalX = posData.x; // Center X
+        const finalX = posData.x; 
         
-        // Scale visuals based on card width ratio
-        // Standard card is ~150px, if active (wide) we might scale up slightly
         const scaleRatio = Math.min(1.3, Math.max(0.8, posData.width / 200)); 
         const currentBaseSize = BASE_SIZE * scaleRatio;
 
-        // Standard animations
         const floatY = Math.sin((time * FLOAT_FREQ) + (index * 1.5)) * FLOAT_AMP; 
 
         const idNum = parseInt(player.id) || 0;
         const totalSeed = (idNum * 2) + visualSeed;
 
-        const classDef = CLASSES[player.classID] || CLASSES.firewall;
-        const mainColor = classDef.color;
+        const classDef = typeof CLASSES !== 'undefined' ? (CLASSES[player.classID] || CLASSES.firewall) : { color: '#00ff41', shapes: ['cube'] };
+        const mainColor = classDef.color || '#00ff41';
         
-        const primaryShapeKey = classDef.shapes[0] || 'cube';
-        const secondaryShapeKey = classDef.shapes[1] || 'cube';
+        const primaryShapeKey = classDef.shapes ? classDef.shapes[0] : 'cube';
+        const secondaryShapeKey = classDef.shapes ? classDef.shapes[1] : 'cube';
         const primaryShape = SHAPES[primaryShapeKey];
         const secondaryShape = SHAPES[secondaryShapeKey];
         const secondaryScale = 0.90 + random(400, totalSeed) * 0.20;

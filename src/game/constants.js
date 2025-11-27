@@ -1,3 +1,7 @@
+// src/game/constants.js
+
+export { CLASSES } from './data/classes';
+
 export const GRID_SPACING = 200;
 export const TUNNEL_DEPTH = 3000;
 export const PERSPECTIVE = 400;
@@ -13,7 +17,7 @@ export const THEME = {
     GAP: 10,                 
     FLEX_INACTIVE: 1,        
     FLEX_ACTIVE: 2.2,        
-    MAX_INACTIVE_WIDTH: 220, // NEW: Cap the size of a single unit
+    MAX_INACTIVE_WIDTH: 220,
     
     // ANIMATION/SHAPE CONSTANTS
     WIDTH: 220,         
@@ -29,15 +33,21 @@ export const THEME = {
     MAG_SECONDARY: 0.02 
   },
   ENEMY: {
-    IDLE_FREQ: 1.2,     
+    // CHANGED: IDLE_FREQ reduced by 50% (1.2 -> 0.6) for slower bobbing
+    IDLE_FREQ: 0.6,     
     IDLE_AMP: 30,       
+    
+    // KEPT: Rotations speeds maintained as requested ("perfect")
     ROT_SPEED_X: 0.5,   
     ROT_SPEED_Y: 0.8,
     ROT_SPEED_Z: 0.3,
+    
     SCALE_UI: 100,      
     SCALE_WIRE: 2.0,    
     HIT_RADIUS: 0.8,    
-    LERP_FACTOR: 0.05   
+    
+    // CHANGED: LERP_FACTOR reduced by 50% (0.05 -> 0.025) for slower movement/flight
+    LERP_FACTOR: 0.025   
   },
   COMBAT: {
     SURGE_Z: 50,        
@@ -59,70 +69,6 @@ export const THEME = {
     TILT_AMP: 0.15, 
     TILT_FREQ_1: 0.2, 
     TILT_FREQ_2: 0.33 
-  }
-};
-
-// --- CLASS DEFINITIONS ---
-export const CLASSES = {
-  firewall: {
-    id: 'firewall',
-    name: 'Firewall',
-    role: 'Tank',
-    color: '#2E9AFE', 
-    hp: 120,
-    shapes: ['cube', 'octahedron'],
-    icon: 'shield',
-    ability: { name: 'Packet Filter', desc: 'High defense mitigation.' }
-  },
-  crash: {
-    id: 'crash',
-    name: 'Crash',
-    role: 'DPS',
-    color: '#FF4500', 
-    hp: 80,
-    shapes: ['tetrahedron', 'cube'],
-    icon: 'x',
-    ability: { name: 'Buffer Overflow', desc: 'High damage burst.' }
-  },
-  rootkit: {
-    id: 'rootkit',
-    name: 'Rootkit',
-    role: 'Rogue',
-    color: '#9400D3', 
-    hp: 70,
-    shapes: ['dodecahedron', 'tetrahedron'],
-    icon: 'star',
-    ability: { name: 'Privilege Escalation', desc: 'Critical hit chance up.' }
-  },
-  zeroday: {
-    id: 'zeroday',
-    name: 'Zero Day',
-    role: 'Sniper',
-    color: '#FFD700', 
-    hp: 60,
-    shapes: ['octahedron', 'dodecahedron'],
-    icon: 'target',
-    ability: { name: 'Exploit', desc: 'Ignores defense.' }
-  },
-  av: {
-    id: 'av',
-    name: 'Antivirus',
-    role: 'Healer',
-    color: '#FFFFFF', 
-    hp: 90,
-    shapes: ['cube', 'dodecahedron'],
-    icon: 'plus',
-    ability: { name: 'Quarantine', desc: 'Restores system integrity.' }
-  },
-  daemon: {
-    id: 'daemon',
-    name: 'Daemon',
-    role: 'Support',
-    color: '#FF1493', 
-    hp: 100,
-    shapes: ['tetrahedron', 'octahedron'], 
-    icon: 'hourglass',
-    ability: { name: 'Background Process', desc: 'Passive buffs.' }
   }
 };
 

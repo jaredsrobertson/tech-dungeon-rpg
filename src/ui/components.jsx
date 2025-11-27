@@ -1,5 +1,6 @@
 import React from 'react';
-import { CLASSES, get2DShapePoints } from '../game/constants';
+import { get2DShapePoints } from '../game/constants';
+import { CLASSES } from '../game/data/classes';
 
 export const IconAttack = () => <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M14.5 5.5L3 17 5.5 19.5 17 8zM19 3L5 17 7 19 21 5z"/></svg>;
 export const IconDefend = () => <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12 1L3 5v6c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V5l-9-4zm0 10.9c-2.8 0-5-2.2-5-5h10c0 2.8-2.2 5-5 5z"/></svg>;

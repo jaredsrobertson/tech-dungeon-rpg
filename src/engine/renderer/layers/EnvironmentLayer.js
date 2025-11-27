@@ -8,7 +8,8 @@ const _p2 = { x: 0, y: 0, scale: 0 };
 const _p3 = { x: 0, y: 0, scale: 0 };
 const _p4 = { x: 0, y: 0, scale: 0 };
 
-export const drawGrid = (ctx, width, height, depth, gradientCacheRef, time) => {
+// CHANGED: Renamed gradientCacheRef to gradientCache and removed .current usage
+export const drawGrid = (ctx, width, height, depth, gradientCache, time) => {
   ctx.globalAlpha = 1; 
   ctx.shadowBlur = 0;
   
@@ -69,12 +70,13 @@ export const drawGrid = (ctx, width, height, depth, gradientCacheRef, time) => {
        project3D(p2D.x, p2D.y, -GRID_SPACING, centerX, centerY, _p1);
        project3D(p2D.x, p2D.y, TUNNEL_DEPTH, centerX, centerY, _p2);
        
-       let grad = gradientCacheRef.current[gradIndex];
+       // FIXED: Access array directly
+       let grad = gradientCache[gradIndex];
        if (!grad) {
            grad = ctx.createLinearGradient(_p1.x, _p1.y, _p2.x, _p2.y);
            grad.addColorStop(0, 'rgba(0, 255, 65, 0.6)'); 
            grad.addColorStop(1, 'rgba(0, 255, 65, 0)'); 
-           gradientCacheRef.current[gradIndex] = grad;
+           gradientCache[gradIndex] = grad;
        }
        
        ctx.strokeStyle = grad;

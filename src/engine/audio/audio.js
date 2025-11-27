@@ -63,6 +63,47 @@ export class CyberSynth {
     source.start();
   }
 
+  // UPDATED: Deeper, Ominous, Ethereal Charge
+  charge() {
+    if (!this.ctx || this.ctx.state === 'suspended') return;
+    const now = this.ctx.currentTime;
+    
+    // Osc 1: Deep Sine (The Ethereal Layer)
+    const osc1 = this.ctx.createOscillator();
+    const gain1 = this.ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(50, now);
+    osc1.frequency.exponentialRampToValueAtTime(150, now + 1.5); // Subtle rise
+    
+    // Osc 2: Gritty Sawtooth (The Ominous Layer)
+    const osc2 = this.ctx.createOscillator();
+    const gain2 = this.ctx.createGain();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(40, now); // Sub-bass start
+    osc2.frequency.exponentialRampToValueAtTime(300, now + 1.5); // Rising tension
+    
+    // Gain Envelopes
+    gain1.gain.setValueAtTime(0, now);
+    gain1.gain.linearRampToValueAtTime(0.3, now + 0.5);
+    gain1.gain.linearRampToValueAtTime(0, now + 1.6);
+
+    gain2.gain.setValueAtTime(0, now);
+    gain2.gain.linearRampToValueAtTime(0.15, now + 1.0); // Fade in slower
+    gain2.gain.linearRampToValueAtTime(0, now + 1.6);
+    
+    // Connect
+    osc1.connect(gain1);
+    gain1.connect(this.masterGain);
+    osc2.connect(gain2);
+    gain2.connect(this.masterGain);
+    
+    // Play
+    osc1.start(now);
+    osc1.stop(now + 1.7);
+    osc2.start(now);
+    osc2.stop(now + 1.7);
+  }
+
   playerAttack(isCrit = false) {
     if (!this.ctx || this.ctx.state === 'suspended') return;
     const now = this.ctx.currentTime;
@@ -89,20 +130,40 @@ export class CyberSynth {
     }
   }
 
+  // UPDATED: Deeper, Crunchier Attack
   enemyAttack() {
     if (!this.ctx || this.ctx.state === 'suspended') return;
     const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(80, now);
-    osc.frequency.linearRampToValueAtTime(60, now + 0.15);
-    osc.connect(gain);
-    gain.connect(this.masterGain);
-    gain.gain.setValueAtTime(0.4, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
-    osc.start(now);
-    osc.stop(now + 0.2);
+    
+    // Osc 1: Heavy Impact Sawtooth
+    const osc1 = this.ctx.createOscillator();
+    const gain1 = this.ctx.createGain();
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(80, now); // Start lower (80Hz)
+    osc1.frequency.exponentialRampToValueAtTime(20, now + 0.4); // Drop to sub-bass
+    
+    // Osc 2: Square Wave for "Digital Crunch"
+    const osc2 = this.ctx.createOscillator();
+    const gain2 = this.ctx.createGain();
+    osc2.type = 'square';
+    osc2.frequency.setValueAtTime(60, now);
+    osc2.frequency.exponentialRampToValueAtTime(10, now + 0.3); // Fast drop
+
+    osc1.connect(gain1);
+    osc2.connect(gain2);
+    gain1.connect(this.masterGain);
+    gain2.connect(this.masterGain);
+    
+    gain1.gain.setValueAtTime(0.6, now); // Louder impact
+    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+    
+    gain2.gain.setValueAtTime(0.4, now);
+    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+    
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.45);
+    osc2.stop(now + 0.45);
   }
 
   playerDamaged() {
