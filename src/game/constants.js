@@ -22,7 +22,7 @@ export const THEME = {
     // ANIMATION/SHAPE CONSTANTS
     WIDTH: 220,         
     BOTTOM_OFFSET: 250, 
-    BASE_SIZE: 130,
+    BASE_SIZE: 100,
     ROTATION_SPEED: 12, 
     FLOAT_FREQ: 1.2,    
     FLOAT_AMP: 15,
