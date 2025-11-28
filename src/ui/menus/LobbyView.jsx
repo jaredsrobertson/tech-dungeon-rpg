@@ -12,26 +12,10 @@ export const LobbyView = ({ G, moves, playerID }) => {
 
   const handleCardClick = (classID, isClaimed, isMine) => {
     if (!isClaimed) {
-        audio.blip();
         moves.claimHero(classID);
     } else if (isMine) {
-        audio.blip();
         moves.releaseHero(classID);
-    } else {
-        // Locked sound effect logic
-        if (audio.ctx) {
-            const osc = audio.ctx.createOscillator();
-            const gain = audio.ctx.createGain();
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(50, audio.ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(10, audio.ctx.currentTime + 0.1);
-            gain.gain.setValueAtTime(0.2, audio.ctx.currentTime);
-            gain.gain.linearRampToValueAtTime(0, audio.ctx.currentTime + 0.1);
-            osc.connect(gain);
-            gain.connect(audio.masterGain);
-            osc.start(); osc.stop(audio.ctx.currentTime + 0.15);
-        }
-    }
+    } 
   };
 
   return (
@@ -84,12 +68,12 @@ export const LobbyView = ({ G, moves, playerID }) => {
 
         <div className="lobby-actions" style={{display: 'flex', gap: '20px', marginTop: '20px'}}>
             {availableHeroes > 0 && (
-                <button className="btn-title btn-small" onClick={() => { audio.blip(); moves.claimAllHeroes(); }}>
+                <button className="btn-title btn-small" onClick={() => { moves.claimAllHeroes(); }}>
                     SELECT ALL AVAILABLE
                 </button>
             )}
             {myHeroes > 0 && (
-                <button className="btn-title btn-small btn-danger" onClick={() => { audio.blip(); moves.releaseAllHeroes(); }}>
+                <button className="btn-title btn-small btn-danger" onClick={() => { moves.releaseAllHeroes(); }}>
                     DESELECT ALL
                 </button>
             )}
@@ -99,7 +83,7 @@ export const LobbyView = ({ G, moves, playerID }) => {
             <button 
                 className="btn-title" 
                 disabled={!canStart} 
-                onClick={() => { audio.warp(); moves.startRun(); }}
+                onClick={() => { moves.startRun(); }}
                 style={{ width: '300px', marginTop: '30px' }}
             >
                 [ JACK IN ]

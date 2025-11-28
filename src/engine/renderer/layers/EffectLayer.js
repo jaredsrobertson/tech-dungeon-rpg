@@ -1,4 +1,5 @@
 // src/engine/renderer/layers/EffectLayer.js
+import { DIALOGUE_LENGTH } from '../../../game/constants';
 
 export const drawSpeechBubble = (ctx, x, y, text) => {
     const padding = 10;
@@ -6,9 +7,12 @@ export const drawSpeechBubble = (ctx, x, y, text) => {
     const font = `${fontSize}px monospace`;
     
     ctx.font = font;
-    const textMetrics = ctx.measureText(text);
-    const textWidth = textMetrics.width;
-    const boxWidth = Math.max(200, textWidth + padding * 2);
+    
+    // Predetermined Width Calculation
+    // Estimate char width for 'monospace' (approx via '0')
+    const charWidth = ctx.measureText('0').width;
+    const boxWidth = (charWidth * DIALOGUE_LENGTH) + (padding * 2);
+    
     const boxHeight = fontSize + padding * 2 + 10;
 
     const boxX = x - boxWidth / 2;
@@ -38,9 +42,14 @@ export const drawSpeechBubble = (ctx, x, y, text) => {
     ctx.textBaseline = 'middle';
     ctx.fillText(text, x, boxY + boxHeight / 2);
     
+    // Red Typing Indicator (Cursor)
+    // We calculate position based on the currently displayed text
+    const currentTextWidth = ctx.measureText(text).width;
+    
     if (Math.floor(Date.now() / 500) % 2 === 0) {
         ctx.fillStyle = '#cc0044';
-        const cx = x + textWidth / 2 + 5;
+        // Position cursor at the end of the current centered text
+        const cx = x + (currentTextWidth / 2) + 5;
         ctx.fillRect(cx, boxY + padding + 2, 8, fontSize);
     }
 

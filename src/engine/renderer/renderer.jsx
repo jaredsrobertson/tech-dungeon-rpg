@@ -88,11 +88,9 @@ export const TunnelRenderer = React.memo(({
         if (oldEnemy && enemy.hp < oldEnemy.hp) {
             s.damageTimers[enemy.id] = performance.now();
             s.pendingDamage[enemy.id] = { val: oldEnemy.hp - enemy.hp };
-            audio.enemyDamaged(); 
         }
         if (enemy.hp <= 0 && oldEnemy && oldEnemy.hp > 0) {
             s.deathTimers[enemy.id] = performance.now();
-            audio.enemyDeath(); 
         }
     });
 
@@ -101,7 +99,6 @@ export const TunnelRenderer = React.memo(({
         if (prev && prev.hp > 0 && player.hp < prev.hp) {
             s.damageTimers[player.id] = performance.now();
             s.pendingDamage[player.id] = { val: prev.hp - player.hp }; 
-            audio.playerDamaged(); 
             
             // FIX: Use the tracked enemy ID to attribute the attack
             const attackerId = lastActiveEnemyRef.current;
@@ -110,7 +107,6 @@ export const TunnelRenderer = React.memo(({
                 s.attackTimers[attackerId] = { targetId: player.id, start: performance.now() };
             }
         }
-        if (prev && prev.hp > 0 && player.hp === 0) { audio.playerDeath(); }
     });
 
     // Update State

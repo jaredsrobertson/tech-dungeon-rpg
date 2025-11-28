@@ -75,11 +75,10 @@ export const CombatView = ({ G, moves }) => {
         const key = e.key.toLowerCase();
         
         if (key === 'escape') { 
-            audio.blip(); 
             setMenuOpen(m => !m); 
             setAttackMode(false); 
         } else if (!menuOpen && G.activeEntity && !G.activeEntity.startsWith('e') && G.activeEntity !== 'boss') {
-            if (key === 'a') { audio.blip(); setAttackMode(m => !m); }
+            if (key === 'a') { setAttackMode(m => !m); }
             if (key === 'd') { moves.defend(); setAttackMode(false); }
             if (attackMode && (key === '1' || key === '2')) {
                 const enemies = Object.values(G.enemies);

@@ -167,14 +167,14 @@ export const HUD = ({ G, moves, playerPositions, attackMode, setAttackMode, isWa
                               }}>
                                   <button 
                                       style={attackMode ? activeBtnStyle : btnStyle}
-                                      onClick={() => { audio.blip(); setAttackMode(!attackMode); }}
+                                      onClick={() => { setAttackMode(!attackMode); }}
                                       title="ATTACK"
                                   >
                                       <IconAttack />
                                   </button>
                                   <button 
                                       style={btnStyle}
-                                      onClick={() => { audio.blip(); moves.defend(); }}
+                                      onClick={() => { moves.defend(); }}
                                       title="DEFEND"
                                   >
                                       <IconDefend />

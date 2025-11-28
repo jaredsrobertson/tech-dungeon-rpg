@@ -8,6 +8,9 @@ export const PERSPECTIVE = 400;
 export const NUM_PARTICLES = 50;
 export const TARGET_FPS = 60;
 
+// Fixed length for dialogue
+export const DIALOGUE_LENGTH = 25; 
+
 // --- THEME CONFIGURATION ---
 export const THEME = {
   PLAYER: {
@@ -240,20 +243,16 @@ export class FloatingText {
   }
 }
 
-const CODE_SYMBOLS = "<>{}[]/\\|;:_#$!@%^&*()-+=?"; 
-const NUMS = "0123456789";
-const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const CODE_SYMBOLS = "<>{}[]/\\|;:_#$!@%^&*()-+=? "; 
+const NUMS = "0123456789 ";
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
 export const GLITCH_CHARS = CODE_SYMBOLS.repeat(4) + NUMS.repeat(2) + ALPHABET;
 
+// Generate fixed length random characters
 export const generateGlitchText = () => {
-    const numWords = 3 + Math.floor(Math.random() * 3); 
-    let result = [];
-    for(let i = 0; i < numWords; i++) {
-        const r = Math.random();
-        let len = (r < 0.2) ? 4 : (r < 0.5) ? 5 : (r < 0.8) ? 6 : 8; 
-        let word = "";
-        for(let j = 0; j < len; j++) word += GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)]; 
-        result.push(word);
+    let result = "";
+    for (let i = 0; i < DIALOGUE_LENGTH; i++) {
+        result += GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)]; 
     }
-    return result.join(' ');
+    return result;
 };

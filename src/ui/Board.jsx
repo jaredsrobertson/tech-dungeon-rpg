@@ -10,7 +10,6 @@ export function KernelBoard({ G, moves, playerID }) {
   const handleNewGame = () => {
       audio.init();
       setGameStarted(true);
-      audio.warp(); 
   };
 
   // --- TITLE SCREEN ---
