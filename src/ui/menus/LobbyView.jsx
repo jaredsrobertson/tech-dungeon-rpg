@@ -1,10 +1,14 @@
 import React from 'react';
-import { CLASSES } from '../../game/data/classes'; // Updated import path
+import { CLASSES } from '../../game/data/classes'; 
 import { PlayerIcon } from '../components';
 import { audio } from '../../engine/audio/audio';
 
 export const LobbyView = ({ G, moves, playerID }) => {
   const canStart = Object.values(G.lobbyState).some(id => id !== null);
+  
+  // Helpers to count
+  const myHeroes = Object.values(G.lobbyState).filter(pid => String(pid) === String(playerID)).length;
+  const availableHeroes = Object.values(G.lobbyState).filter(pid => pid === null).length;
 
   const handleCardClick = (classID, isClaimed, isMine) => {
     if (!isClaimed) {
@@ -76,6 +80,19 @@ export const LobbyView = ({ G, moves, playerID }) => {
                     </div>
                 );
             })}
+        </div>
+
+        <div className="lobby-actions" style={{display: 'flex', gap: '20px', marginTop: '20px'}}>
+            {availableHeroes > 0 && (
+                <button className="btn-title btn-small" onClick={() => { audio.blip(); moves.claimAllHeroes(); }}>
+                    SELECT ALL AVAILABLE
+                </button>
+            )}
+            {myHeroes > 0 && (
+                <button className="btn-title btn-small btn-danger" onClick={() => { audio.blip(); moves.releaseAllHeroes(); }}>
+                    DESELECT ALL
+                </button>
+            )}
         </div>
 
         <div className="lobby-footer">

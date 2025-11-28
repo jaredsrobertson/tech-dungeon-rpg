@@ -8,13 +8,14 @@ const _p2 = { x: 0, y: 0, scale: 0 };
 const _p3 = { x: 0, y: 0, scale: 0 };
 const _p4 = { x: 0, y: 0, scale: 0 };
 
-// CHANGED: Renamed gradientCacheRef to gradientCache and removed .current usage
-export const drawGrid = (ctx, width, height, depth, gradientCache, time) => {
+export const drawGrid = (ctx, width, height, depth, gradientCache, time, cameraX, cameraY) => {
   ctx.globalAlpha = 1; 
   ctx.shadowBlur = 0;
   
-  const centerX = width / 2;
-  const centerY = height * 0.35;
+  // Use passed-in camera coords for "drift" effect
+  const centerX = cameraX;
+  const centerY = cameraY;
+  
   const tunnelHalfW = width / 2;
   const tunnelHalfH = width / 2; 
   const numRings = Math.floor(TUNNEL_DEPTH / GRID_SPACING);
@@ -70,9 +71,12 @@ export const drawGrid = (ctx, width, height, depth, gradientCache, time) => {
        project3D(p2D.x, p2D.y, -GRID_SPACING, centerX, centerY, _p1);
        project3D(p2D.x, p2D.y, TUNNEL_DEPTH, centerX, centerY, _p2);
        
-       // FIXED: Access array directly
        let grad = gradientCache[gradIndex];
        if (!grad) {
+           // Gradient is relative to screen, might need update if camera moves significantly?
+           // Actually linear gradient coords are absolute. Since points move, we might need to recreate gradient if it looks weird.
+           // For now, static gradient is usually "good enough" for wireframes, or we can just recalc.
+           // Let's recalc to be safe since the tunnel physically moves on screen.
            grad = ctx.createLinearGradient(_p1.x, _p1.y, _p2.x, _p2.y);
            grad.addColorStop(0, 'rgba(0, 255, 65, 0.6)'); 
            grad.addColorStop(1, 'rgba(0, 255, 65, 0)'); 

@@ -27,7 +27,10 @@ export const HUD = ({ G, moves, playerPositions, attackMode, setAttackMode, isWa
               <span style={{color:'#666', fontSize:'0.7rem', marginRight:'5px'}}>SEQ:</span>
               {turnOrder.map((entity) => {
                   const isActive = entity.id === G.activeEntity;
-                  const isEnemy = entity.id.startsWith('e');
+                  
+                  // FIXED: Specifically check for boss ID or 'e' prefix
+                  const isEnemy = entity.id.startsWith('e') || entity.id === 'boss';
+                  
                   const color = isEnemy ? '#ff0055' : (CLASSES[entity.classID]?.color || '#00ff41');
                   
                   return (
@@ -41,8 +44,9 @@ export const HUD = ({ G, moves, playerPositions, attackMode, setAttackMode, isWa
                           transition: 'all 0.3s'
                       }}>
                            {isEnemy ? 
-                              // FIXED: Added missing 'color' in the else branch
-                              <span style={{color: isActive ? '#000' : color, fontWeight:'bold', fontSize:'0.7rem'}}>{entity.name[0]}</span> 
+                              <span style={{color: isActive ? '#000' : color, fontWeight:'bold', fontSize:'0.7rem'}}>
+                                  {entity.type === 'boss' ? 'B' : entity.name[0]}
+                              </span> 
                               : <PlayerIcon classID={entity.classID} size={20} />
                           }
                       </div>

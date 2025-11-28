@@ -22,7 +22,7 @@ export const THEME = {
     // ANIMATION/SHAPE CONSTANTS
     WIDTH: 220,         
     BOTTOM_OFFSET: 250, 
-    BASE_SIZE: 150,
+    BASE_SIZE: 130,
     ROTATION_SPEED: 12, 
     FLOAT_FREQ: 1.2,    
     FLOAT_AMP: 15,
@@ -33,27 +33,32 @@ export const THEME = {
     MAG_SECONDARY: 0.02 
   },
   ENEMY: {
-    // CHANGED: IDLE_FREQ reduced by 50% (1.2 -> 0.6) for slower bobbing
     IDLE_FREQ: 0.6,     
     IDLE_AMP: 30,       
-    
-    // KEPT: Rotations speeds maintained as requested ("perfect")
     ROT_SPEED_X: 0.5,   
     ROT_SPEED_Y: 0.8,
     ROT_SPEED_Z: 0.3,
-    
     SCALE_UI: 100,      
     SCALE_WIRE: 2.0,    
     HIT_RADIUS: 0.8,    
-    
-    // CHANGED: LERP_FACTOR reduced by 50% (0.05 -> 0.025) for slower movement/flight
     LERP_FACTOR: 0.025   
+  },
+  BOSS: {
+    COLOR: '#ff0000',
+    // Cloud Settings
+    PARTICLE_COUNT: 700, 
+    CLOUD_RADIUS: 1400,  
+    NOISE_SCALE: 200,    
+    NOISE_SPEED: 1.5,    
+    ROT_SPEED: 0.2,      
+    CHAR_O: '01'         
   },
   COMBAT: {
     SURGE_Z: 50,        
     SHAKE_X: 8,         
     DAMAGE_SHAKE: 20,   
     LASER_WIDTH: 4,
+    LASER_WIDTH_BOSS: 25, // ADDED: Massive beam width
     LASER_COLOR: 'rgba(255, 0, 0, 0.8)' 
   },
   UI: {
@@ -68,7 +73,10 @@ export const THEME = {
   ENV: {
     TILT_AMP: 0.15, 
     TILT_FREQ_1: 0.2, 
-    TILT_FREQ_2: 0.33 
+    TILT_FREQ_2: 0.33,
+    DRIFT_AMP: 0.025,   
+    DRIFT_FREQ_X: 0.3,  
+    DRIFT_FREQ_Y: 0.2   
   }
 };
 

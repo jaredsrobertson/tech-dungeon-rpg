@@ -3,6 +3,23 @@ import { CLASSES } from '../../../game/data/classes';
 import { rotateVertices } from '../../../utils/math';
 import { project3D, drawShapeFaces, lerp } from '../renderHelpers';
 
+// Helper to check which faces are facing the camera (back-face culling logic)
+const getVisibleFaces = (transformedVerts, faces) => {
+    return faces.filter(face => {
+        const v1 = transformedVerts[face.indices[0]];
+        const v2 = transformedVerts[face.indices[1]];
+        const v3 = transformedVerts[face.indices[2]];
+        
+        // Compute Normal Z component via Cross Product
+        const ax = v2.x - v1.x, ay = v2.y - v1.y;
+        const bx = v3.x - v1.x, by = v3.y - v1.y;
+        const nz = ax * by - ay * bx; // Z component of normal
+        
+        // If Z > 0, face is pointing towards camera
+        return nz > 0;
+    });
+};
+
 const updateVisualState = (enemy, visualStateRef, time) => {
     let viz = visualStateRef.current[enemy.id];
     if (!viz) {
@@ -13,6 +30,100 @@ const updateVisualState = (enemy, visualStateRef, time) => {
     viz.y = lerp(viz.y, (enemy.y || 0), THEME.ENEMY.LERP_FACTOR);
     viz.z = lerp(viz.z, enemy.distance, THEME.ENEMY.LERP_FACTOR);
     return viz;
+};
+
+// --- NEW BOSS RENDERER (CLOUD) ---
+// ADDED: isCharging, isFiring states
+const drawAsciiBoss = (ctx, enemy, pos, size, time, isTargeted, isDamaged, damageElapsed, isCharging, isFiring) => {
+    const { 
+        COLOR, CHAR_O, PARTICLE_COUNT, CLOUD_RADIUS, 
+        NOISE_SCALE, NOISE_SPEED, ROT_SPEED 
+    } = THEME.BOSS;
+
+    const toRad = (deg) => deg * Math.PI / 180;
+    const phi = Math.PI * (3 - Math.sqrt(5)); 
+
+    const particles = [];
+    const rotY = time * ROT_SPEED;
+    const rotX = Math.sin(time * 0.5) * 0.2;
+
+    // --- COLOR LOGIC FOR ATTACK ---
+    // Default red
+    let r = 255, g = 0, b = 0; 
+    
+    if (isCharging) {
+        // Pulse white/red
+        const pulse = Math.sin(time * 20) * 0.5 + 0.5;
+        g = 150 * pulse;
+        b = 150 * pulse;
+    }
+    if (isFiring) {
+        // Intense bright white/red mix
+        g = 200;
+        b = 200;
+    }
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+        // Safe spherical distribution
+        const yBase = 1 - (i / Math.max(1, PARTICLE_COUNT - 1)) * 2; 
+        const radiusAtY = Math.sqrt(Math.max(0, 1 - yBase * yBase)); // Safety clamp
+        const theta = phi * i;
+        
+        const xBase = Math.cos(theta) * radiusAtY;
+        const zBase = Math.sin(theta) * radiusAtY;
+
+        const noise = Math.sin(time * NOISE_SPEED + i * 0.1) * NOISE_SCALE;
+        const radius = CLOUD_RADIUS + noise;
+
+        const x = xBase * radius;
+        const y = yBase * radius;
+        const z = zBase * radius;
+
+        // Manual Rotation
+        const x1 = x * Math.cos(rotY) - z * Math.sin(rotY);
+        const z1 = x * Math.sin(rotY) + z * Math.cos(rotY);
+        const y2 = y * Math.cos(rotX) - z1 * Math.sin(rotX);
+        const z2 = y * Math.sin(rotX) + z1 * Math.cos(rotX);
+
+        particles.push({ x: x1, y: y2, z: z2, i });
+    }
+
+    particles.sort((a, b) => b.z - a.z); 
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    particles.forEach(p => {
+        // Safe projection using current pos scale
+        const screenX = pos.x + p.x * pos.scale;
+        const screenY = pos.y + p.y * pos.scale;
+        
+        const alpha = Math.max(0.1, Math.min(1, 1 - (p.z / CLOUD_RADIUS) * 0.5));
+        
+        // Increase font size slightly to ensure visibility
+        const fontSize = Math.max(12, 30 * pos.scale * (1 - p.z/2000)); 
+
+        ctx.font = `bold ${fontSize}px monospace`;
+        
+        if (isDamaged) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+        } else {
+            // Apply dynamic attack color
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        const char = CHAR_O && CHAR_O.length > 0 ? CHAR_O[p.i % CHAR_O.length] : '0';
+        ctx.fillText(char, screenX, screenY);
+    });
+
+    if (isTargeted) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const breathe = Math.sin(time * 3) * 10;
+        ctx.arc(pos.x, pos.y, (CLOUD_RADIUS * pos.scale) + breathe, 0, Math.PI * 2);
+        ctx.stroke();
+    }
 };
 
 const drawCoreGlow = (ctx, x, y, size, color) => {
@@ -72,7 +183,8 @@ const calculateCombatOffsets = (enemy, attackTimersRef, damageTimersRef, time, n
     return { offsetX: 0, offsetY: 0, offsetZ: 0, isDamaged, damageElapsed, isFiring, isCharging, attackTimer };
 };
 
-const drawLaser = (ctx, pos, attackTimer, width, height, players, playerPositions) => {
+// ADDED: thickness parameter
+const drawLaser = (ctx, pos, attackTimer, width, height, players, playerPositions, thickness = 4) => {
     if (!attackTimer) return;
     const targetPos = playerPositions ? playerPositions[attackTimer.targetId] : null;
     if (!targetPos) return;
@@ -84,7 +196,8 @@ const drawLaser = (ctx, pos, attackTimer, width, height, players, playerPosition
     ctx.moveTo(pos.x, pos.y);
     ctx.lineTo(playerX, playerY);
     ctx.strokeStyle = THEME.COMBAT.LASER_COLOR; 
-    ctx.lineWidth = THEME.COMBAT.LASER_WIDTH + Math.random() * 4;
+    // Use thickness
+    ctx.lineWidth = thickness + Math.random() * 4;
     ctx.shadowBlur = 20; ctx.shadowColor = '#ff0000';
     ctx.stroke(); ctx.shadowBlur = 0;
 };
@@ -237,10 +350,11 @@ export const drawEnemies = ({
   ctx, width, height, 
   enemies, players, 
   visualStateRef, damageTimersRef, deathTimersRef, attackTimersRef,
-  currentTarget, time, onHitZoneUpdate, playerPositions 
+  currentTarget, time, onHitZoneUpdate, playerPositions,
+  cameraX, cameraY // Use passed camera coords
 }) => {
-  const centerX = width / 2;
-  const centerY = height * 0.35;
+  const centerX = cameraX; // Use drift camera
+  const centerY = cameraY;
   const now = performance.now();
   const nextHitZones = {};
 
@@ -252,23 +366,41 @@ export const drawEnemies = ({
     const viz = updateVisualState(enemy, visualStateRef, time);
     if (!viz) return;
     
-    const idleOffset = Math.sin(time * THEME.ENEMY.IDLE_FREQ + viz.idlePhase) * THEME.ENEMY.IDLE_AMP; 
-    
     const { offsetX, offsetY, offsetZ, isDamaged, damageElapsed, isFiring, isCharging, attackTimer } = calculateCombatOffsets(enemy, attackTimersRef, damageTimersRef, time, now);
     
+    // Position Projection
+    const idleOffset = Math.sin(time * THEME.ENEMY.IDLE_FREQ + viz.idlePhase) * THEME.ENEMY.IDLE_AMP; 
     const pos = project3D(viz.x + offsetX, viz.y + idleOffset + offsetY, viz.z + offsetZ, centerX, centerY);
     const uiSize = THEME.ENEMY.SCALE_UI * pos.scale; 
-    const wireframeSize = uiSize * THEME.ENEMY.SCALE_WIRE; 
-    nextHitZones[enemy.id] = { x: pos.x, y: pos.y, r: wireframeSize * THEME.ENEMY.HIT_RADIUS }; 
-    
-    if (isFiring) drawLaser(ctx, pos, attackTimer, width, height, players, playerPositions);
-    
     const isTargeted = currentTarget === enemy.id;
+
+    // --- RENDER BRANCH ---
+    if (enemy.type === 'boss') {
+        // Larger hitzone for boss
+        nextHitZones[enemy.id] = { x: pos.x, y: pos.y, r: 150 }; // Fixed large hitzone
+        
+        // ADDED: Pass charging/firing state
+        drawAsciiBoss(ctx, enemy, pos, uiSize, time, isTargeted, isDamaged, damageElapsed, isCharging, isFiring);
+        
+        if (isTargeted) {
+            drawEnemyTooltip(ctx, enemy, { x: pos.x, y: pos.y + 180 }, 30); 
+        }
+
+    } else {
+        // Normal Enemies
+        const wireframeSize = uiSize * THEME.ENEMY.SCALE_WIRE; 
+        nextHitZones[enemy.id] = { x: pos.x, y: pos.y, r: wireframeSize * THEME.ENEMY.HIT_RADIUS }; 
+        
+        drawEnemyWireframe(ctx, enemy, pos, uiSize, wireframeSize, time, isTargeted, isDamaged, damageElapsed, isFiring, isCharging);
+        if (isTargeted) drawEnemyTooltip(ctx, enemy, pos, uiSize);
+    }
     
-    drawEnemyWireframe(ctx, enemy, pos, uiSize, wireframeSize, time, isTargeted, isDamaged, damageElapsed, isFiring, isCharging);
-    
-    if (isTargeted) { drawEnemyTooltip(ctx, enemy, pos, uiSize); }
+    // Laser Draw (Shared)
+    // ADDED: Select Laser Width
+    const beamWidth = (enemy.type === 'boss') ? THEME.COMBAT.LASER_WIDTH_BOSS : THEME.COMBAT.LASER_WIDTH;
+    if (isFiring) drawLaser(ctx, pos, attackTimer, width, height, players, playerPositions, beamWidth);
   });
+  
   onHitZoneUpdate(nextHitZones);
 };
 

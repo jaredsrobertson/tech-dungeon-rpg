@@ -35,7 +35,10 @@ export const CombatView = ({ G, moves }) => {
 
   useEffect(() => {
       if (G.phase !== 'combat') return;
-      if (G.activeEntity && G.activeEntity.startsWith('e')) {
+      
+      // FIXED: Check if the active entity exists in the enemies list (boss OR normal)
+      // This allows 'boss' ID to pass through
+      if (G.activeEntity && G.enemies[G.activeEntity]) {
           const enemy = G.enemies[G.activeEntity];
           if (!enemy || enemy.hp <= 0) { moves.enemyAttack(G.activeEntity); return; }
           
@@ -48,7 +51,10 @@ export const CombatView = ({ G, moves }) => {
               return () => clearTimeout(timer);
           }
       }
-      if (G.activeEntity && G.activeEntity.startsWith('e')) setAttackMode(false);
+      
+      // Close attack menu if it's enemy turn
+      if (G.activeEntity && G.enemies[G.activeEntity]) setAttackMode(false);
+      
   }, [G.activeEntity, G.phase, G.enemies]);
 
   useEffect(() => {
@@ -72,7 +78,7 @@ export const CombatView = ({ G, moves }) => {
             audio.blip(); 
             setMenuOpen(m => !m); 
             setAttackMode(false); 
-        } else if (!menuOpen && G.activeEntity && !G.activeEntity.startsWith('e')) {
+        } else if (!menuOpen && G.activeEntity && !G.activeEntity.startsWith('e') && G.activeEntity !== 'boss') {
             if (key === 'a') { audio.blip(); setAttackMode(m => !m); }
             if (key === 'd') { moves.defend(); setAttackMode(false); }
             if (attackMode && (key === '1' || key === '2')) {

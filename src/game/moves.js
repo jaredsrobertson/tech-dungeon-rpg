@@ -3,10 +3,34 @@ import { assignSlot } from './mechanics/grid';
 import { calculateDamage, getActiveEntities, getNextId, triggerEvent } from './mechanics/combat';
 
 const generateEnemies = (depth) => {
-    const scale = 1 + (depth * 0.2);
     const enemies = {};
     const placed = [];
 
+    // --- BOSS LOGIC ---
+    // TEMP: Spawn Boss at Depth 1 and 10 for testing.
+    // (Eventually this will be every 10 levels)
+    if (depth === 1 || depth === 10) {
+        const bossHp = 500 + (depth * 50);
+        enemies['boss'] = {
+            id: 'boss',
+            type: 'boss', // Special type flag
+            name: `SYSTEM_DAEMON_v${depth}.0`,
+            hp: bossHp,
+            maxHp: bossHp,
+            speed: 5, // Slow but powerful
+            isCharging: false,
+            targetId: null,
+            // Hardcoded position: Dead center, slightly further back for scale
+            x: 0, 
+            y: 0, 
+            distance: 2500, // Starts further back
+            gridSlot: { col: 0, row: 0 }
+        };
+        return enemies;
+    }
+
+    // --- STANDARD LOGIC ---
+    const scale = 1 + (depth * 0.2);
     const templates = [
         { id: 'e1', name: 'Trojan', hp: 100, speed: 4 },
         { id: 'e2', name: 'Glitch', hp: 50, speed: 9 },
@@ -48,6 +72,22 @@ export const moves = {
     releaseHero: ({ G, ctx }, classID) => {
         const pid = (ctx.playerID !== undefined && ctx.playerID !== null) ? ctx.playerID : ctx.currentPlayer;
         if (G.lobbyState[classID] === String(pid)) G.lobbyState[classID] = null;
+    },
+
+    // ADDED: Select All
+    claimAllHeroes: ({ G, ctx }) => {
+        const pid = String((ctx.playerID !== undefined && ctx.playerID !== null) ? ctx.playerID : ctx.currentPlayer);
+        Object.keys(G.lobbyState).forEach(id => {
+            if (G.lobbyState[id] === null) G.lobbyState[id] = pid;
+        });
+    },
+
+    // ADDED: Deselect All
+    releaseAllHeroes: ({ G, ctx }) => {
+        const pid = String((ctx.playerID !== undefined && ctx.playerID !== null) ? ctx.playerID : ctx.currentPlayer);
+        Object.keys(G.lobbyState).forEach(id => {
+            if (G.lobbyState[id] === pid) G.lobbyState[id] = null;
+        });
     },
 
     startRun: ({ G }) => {
@@ -139,7 +179,6 @@ export const moves = {
         enemy.isCharging = true;
         
         G.log.push(`> ${enemy.name} :: CHARGING WEAPONS...`);
-        // ADDED: Trigger audio event for charging
         triggerEvent(G, 'ENEMY_CHARGE');
     },
 
@@ -173,22 +212,25 @@ export const moves = {
             triggerEvent(G, 'PLAYER_DEATH');
         }
         
-        const allEnemies = Object.values(G.enemies).filter(e => e.hp > 0);
-        const moveResult = assignSlot(allEnemies, enemy.id);
-        
-        if (moveResult) {
-            if (moveResult.swapWithId) {
-                const swapTarget = G.enemies[moveResult.swapWithId];
-                if (swapTarget) {
-                    swapTarget.x = enemy.x;
-                    swapTarget.y = enemy.y;
-                    swapTarget.distance = enemy.distance;
-                    swapTarget.slotIndex = enemy.slotIndex;
-                    swapTarget.gridSlot = enemy.gridSlot;
+        // --- BOSS MOVEMENT GUARD ---
+        if (enemy.type !== 'boss') {
+            const allEnemies = Object.values(G.enemies).filter(e => e.hp > 0 && e.type !== 'boss');
+            const moveResult = assignSlot(allEnemies, enemy.id);
+            
+            if (moveResult) {
+                if (moveResult.swapWithId) {
+                    const swapTarget = G.enemies[moveResult.swapWithId];
+                    if (swapTarget) {
+                        swapTarget.x = enemy.x;
+                        swapTarget.y = enemy.y;
+                        swapTarget.distance = enemy.distance;
+                        swapTarget.slotIndex = enemy.slotIndex;
+                        swapTarget.gridSlot = enemy.gridSlot;
+                    }
                 }
+                Object.assign(enemy, moveResult);
+                delete enemy.swapWithId; 
             }
-            Object.assign(enemy, moveResult);
-            delete enemy.swapWithId; 
         }
 
         enemy.isCharging = false;

@@ -25,7 +25,7 @@ export const TunnelRenderer = React.memo(({
   const prevTimeRef = useRef(0);
   const lastHoveredRef = useRef(null);
   
-  // FIX: Track the last enemy to act, so we know who attacked even after turn ends
+  // Track the last enemy to act (to trigger attack animations on damage)
   const lastActiveEnemyRef = useRef(null);
 
   // --- SINGLE SOURCE OF TRUTH FOR RENDER LOOP ---
@@ -103,9 +103,10 @@ export const TunnelRenderer = React.memo(({
             s.pendingDamage[player.id] = { val: prev.hp - player.hp }; 
             audio.playerDamaged(); 
             
-            // FIX: Use the tracked enemy ID instead of the current activeEntity
+            // FIX: Use the tracked enemy ID to attribute the attack
             const attackerId = lastActiveEnemyRef.current;
             if (attackerId) {
+                // Register the attack timer for the laser animation
                 s.attackTimers[attackerId] = { targetId: player.id, start: performance.now() };
             }
         }
@@ -133,9 +134,10 @@ export const TunnelRenderer = React.memo(({
     }
   }, [enemies, players, playerPositions, isWarping, depth, targetedEnemy, uiScale, activeEntity, speakingId, speechText, visualSeed]);
 
-  // FIX: Update the tracker *after* the render logic
+  // FIX: Update the tracker when activeEntity changes
+  // Now includes 'boss' ID so the laser originates correctly
   useEffect(() => {
-      if (activeEntity && activeEntity.startsWith('e')) {
+      if (activeEntity && (activeEntity.startsWith('e') || activeEntity === 'boss')) {
           lastActiveEnemyRef.current = activeEntity;
       }
   }, [activeEntity]);
@@ -196,12 +198,22 @@ export const TunnelRenderer = React.memo(({
     const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
 
     const resize = () => {
-      const dpr = 0.75; // Low Res for aesthetic/perf
+      // 1. Get accurate device pixel ratio
+      const dpr = window.devicePixelRatio || 1;
+      
+      // 2. Set actual canvas size (physical pixels)
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
+      
+      // 3. Set display size (CSS pixels)
       canvas.style.width = `${window.innerWidth}px`;
       canvas.style.height = `${window.innerHeight}px`;
+      
+      // 4. Scale the context to match logical coordinate system
+      // Reset transform to avoid compounding scales on multiple resizes
+      ctx.setTransform(1, 0, 0, 1, 0, 0); 
       ctx.scale(dpr, dpr);
+      
       renderState.current.gradientCache = []; // Reset gradients on resize
     };
 
@@ -210,8 +222,12 @@ export const TunnelRenderer = React.memo(({
       const dt = (timestamp - prevTimeRef.current) / 1000;
       prevTimeRef.current = timestamp;
 
-      const width = canvas.width / 0.75;  // Unscale width for logic
-      const height = canvas.height / 0.75;
+      // 5. Use logical dimensions (CSS pixels) for game logic
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      
+      // Clear using logical dimensions
+      ctx.clearRect(0, 0, width, height);
 
       drawFrame(ctx, width, height, dt, renderState.current);
       
