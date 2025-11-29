@@ -68,26 +68,68 @@ export const CombatView = ({ G, moves }) => {
      }
   }, [speakingId, speechQueue, G.enemies]);
 
+  // --- KEYBOARD SHORTCUTS ---
   useEffect(() => {
     const onKey = (e) => {
         if (isWarping || speakingId) return;
-        const key = e.key.toLowerCase();
         
+        const key = e.key.toLowerCase();
+        const activePlayer = G.players[G.activeEntity];
+        const isPlayerTurn = activePlayer && G.activeEntity && !G.activeEntity.startsWith('e') && G.activeEntity !== 'boss';
+
+        // 1. Global Toggles
         if (key === 'escape') { 
             if (managingPlayerId) setManagingPlayerId(null);
-            else {
-                setMenuOpen(m => !m); 
-                setSelectedAbility(null); 
+            else setMenuOpen(m => !m);
+            setSelectedAbility(null);
+            return;
+        }
+
+        // 2. Victory / Navigation
+        if (G.phase === 'victory' && (key === ' ' || key === 'enter')) {
+            handleNextSector();
+            return;
+        }
+
+        // 3. Combat Controls (Only during Player Turn)
+        if (!menuOpen && !managingPlayerId && isPlayerTurn) {
+            
+            // DEFEND
+            if (key === 'd') { 
+                moves.defend(); 
+                setSelectedAbility(null);
             }
-        } else if (!menuOpen && !managingPlayerId && G.activeEntity && !G.activeEntity.startsWith('e') && G.activeEntity !== 'boss') {
-            if (key === 'd') { moves.defend(); setSelectedAbility(null); }
+
+            // ABILITIES (1, 2, 3)
+            if (['1', '2', '3'].includes(key)) {
+                const slotIdx = parseInt(key) - 1;
+                const abilityID = activePlayer.loadout[slotIdx];
+                
+                if (abilityID) {
+                    // Smart Cast: If only 1 enemy or Boss exists, attack immediately
+                    const livingEnemies = Object.values(G.enemies).filter(e => e.hp > 0);
+                    if (livingEnemies.length === 1) {
+                        moves.useAbility(livingEnemies[0].id, abilityID);
+                    } else {
+                        // Otherwise enter targeting mode
+                        setSelectedAbility(abilityID);
+                    }
+                }
+            }
+            
+            // CANCEL TARGETING
+            if (key === 'backspace' || key === 'delete') {
+                setSelectedAbility(null);
+            }
         }
     };
+
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isWarping, speakingId, menuOpen, managingPlayerId, G.activeEntity]);
+  }, [isWarping, speakingId, menuOpen, managingPlayerId, G.activeEntity, G.phase, G.players, G.enemies]);
 
   const handleNextSector = () => {
+      if (isWarping) return;
       setIsWarping(true);
       setTimeout(() => { 
           moves.nextRoom(); 
@@ -157,7 +199,7 @@ export const CombatView = ({ G, moves }) => {
 
       <div style={{position:'fixed', top:0, left:0, width:'100%', padding:'20px', display:'flex', justifyContent:'flex-end', zIndex:10000, pointerEvents:'none'}}>
           <button className="btn-title" style={{width: 'auto', padding:'5px 15px', fontSize:'0.8rem', pointerEvents:'auto', background:'rgba(0,0,0,0.8)', border:'1px solid #333'}} onClick={() => setMenuOpen(true)}>
-              MENU
+              MENU [ESC]
           </button>
       </div>
 
@@ -179,7 +221,7 @@ export const CombatView = ({ G, moves }) => {
       {/* PAUSE MENU */}
       {menuOpen && (
         <div className="modal-overlay">
-          <div style={{width: 300, border: '2px solid #00ff41', background: '#000', padding: 20, textAlign: 'center'}}>
+          <div className="pause-menu">
             <h2 style={{color:'#00ff41', marginBottom: 20}}>PAUSED</h2>
             <button className="btn-title" style={{width:'100%', marginBottom: 10}} onClick={() => setMenuOpen(false)}>RESUME</button>
             <button className="btn-title" style={{width:'100%', borderColor:'red', color:'red'}} onClick={() => window.location.reload()}>REBOOT SYSTEM</button>
@@ -190,7 +232,7 @@ export const CombatView = ({ G, moves }) => {
       {/* GAME OVER / VICTORY MODALS */}
       {G.phase === 'defeat' && (
           <div className="modal-overlay">
-              <div style={{textAlign:'center', border: '2px solid #cc0044', padding: '40px', background: 'rgba(0,0,0,0.9)'}}>
+              <div className="defeat-modal">
                   <h1 style={{fontSize:'4rem', color:'#cc0044', marginBottom:20, textShadow: '0 0 10px #cc0044'}}>SYSTEM FAILURE</h1>
                   <button className="btn-title" style={{borderColor: '#cc0044', color: '#cc0044'}} onClick={() => window.location.reload()}>[ REBOOT SYSTEM ]</button>
               </div>
@@ -199,9 +241,9 @@ export const CombatView = ({ G, moves }) => {
 
       {G.phase === 'victory' && !isWarping && (
           <div className="modal-overlay">
-              <div style={{textAlign:'center'}}>
+              <div className="victory-modal">
                   <h1 style={{fontSize:'4rem', color:'#00ff41', marginBottom:20}}>SECTOR CLEARED</h1>
-                  <button className="btn-title" onClick={handleNextSector}>PROCEED &gt;&gt;</button>
+                  <button className="btn-title" onClick={handleNextSector}>PROCEED [SPACE]</button>
               </div>
           </div>
       )}

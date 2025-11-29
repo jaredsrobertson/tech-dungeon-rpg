@@ -6,23 +6,30 @@ import { drawGrid } from './layers/EnvironmentLayer';
 import { drawEnemies, drawPlayers } from './layers/EntityLayer';
 import { drawFloatingText, drawSpeechBubble } from './layers/EffectLayer';
 
-export const drawFrame = (ctx, width, height, dt, state) => {
-    // 1. Update Time
+/**
+ * PHASE 1: UPDATE
+ * Handles all logic, physics, timers, and data mutations.
+ * No Context (ctx) calls allowed here.
+ */
+export const update = (state, dt, width, height) => {
+    // 1. Time & Warp
     const warpFactor = state.isWarping ? 10 : 1;
     const safeDt = Math.min(dt, 0.1);
     state.time += safeDt * 1.2 * warpFactor;
 
-    // 2. CAMERA DRIFT CALCULATION
+    // 2. Camera Drift Calculation
     const driftX = Math.sin(state.time * THEME.ENV.DRIFT_FREQ_X) * width * THEME.ENV.DRIFT_AMP;
     const driftY = Math.cos(state.time * THEME.ENV.DRIFT_FREQ_Y) * height * THEME.ENV.DRIFT_AMP;
     
-    // The "Vanishing Point" moves, creating the illusion of the tunnel shifting around
-    const cameraX = (width / 2) + driftX;
-    const cameraY = (height * 0.35) + driftY;
+    // Store camera in state for the draw phase
+    state.camera = {
+        x: (width / 2) + driftX,
+        y: (height * 0.35) + driftY
+    };
 
-    // 3. Lerp Visual Positions (Slide vs Snap)
-    const targets = state.playerPositions; // Target positions from FluidLayout
-    const current = state.currentPositions; // Visual positions
+    // 3. Lerp Visual Positions (Smooth transitions)
+    const targets = state.playerPositions; 
+    const current = state.currentPositions;
     const lerpFactor = 0.1;
 
     Object.keys(targets).forEach(id => {
@@ -34,51 +41,18 @@ export const drawFrame = (ctx, width, height, dt, state) => {
         }
     });
     
-    // Cleanup old keys
+    // Garbage Collect old positions
     Object.keys(current).forEach(id => {
         if (!targets[id]) delete current[id];
     });
 
-    // 4. Draw Layers
-    drawBackground(ctx, width, height);
-    
-    // Ensure particles exist
+    // 4. Particle System Update
     if (state.particles.length === 0) {
         state.particles = Array.from({ length: NUM_PARTICLES }, () => new Particle(width, height));
     }
-    
-    // Pass camera props to layers
-    drawStars(ctx, state.particles, width, height, warpFactor, cameraX, cameraY);
-    drawGrid(ctx, width, height, state.depth, state.gradientCache, state.time, cameraX, cameraY);
+    state.particles.forEach(p => p.update(width, height, warpFactor));
 
-    // 5. Draw Entities
-    drawEnemies({
-        ctx, width, height,
-        enemies: state.enemies,
-        players: state.players,
-        visualStateRef: { current: state.visualState }, 
-        damageTimersRef: { current: state.damageTimers },
-        deathTimersRef: { current: state.deathTimers },
-        attackTimersRef: { current: state.attackTimers },
-        currentTarget: state.targetedEnemy,
-        time: state.time,
-        onHitZoneUpdate: (zones) => { state.hitZones = zones; },
-        playerPositions: state.currentPositions,
-        cameraX, cameraY // Pass camera for 3D projection
-    });
-
-    if (!state.isWarping) {
-        drawPlayers({
-            ctx, width, height,
-            players: state.players,
-            visualSeed: state.visualSeed,
-            time: state.time,
-            uiScale: state.uiScale,
-            playerPositions: state.currentPositions
-        });
-    }
-
-    // 6. Speech System
+    // 5. Speech Logic
     const s = state.speech;
     if (s.activeId && state.enemies) {
         const now = performance.now();
@@ -93,26 +67,18 @@ export const drawFrame = (ctx, width, height, dt, state) => {
                 s.lastUpdate = now;
             }
         } 
-
-        const viz = state.visualState[s.activeId];
-        if (viz) {
-            const idleOffset = Math.sin(state.time * THEME.ENEMY.IDLE_FREQ + viz.idlePhase) * THEME.ENEMY.IDLE_AMP;
-            const pos = project3D(viz.x, viz.y + idleOffset, viz.z, cameraX, cameraY);
-            const size = THEME.ENEMY.SCALE_UI * pos.scale;
-            drawSpeechBubble(ctx, pos.x, pos.y - size * 1.1, s.displayed);
-        }
     }
 
-    // 7. Floating Text & Damage Numbers
+    // 6. Floating Text & Damage Numbers Logic
     const now = performance.now();
 
-    // Process Pending Damage (Enemies)
+    // Spawn Pending Damage Text (Enemies)
     state.enemies.forEach(enemy => {
         const pending = state.pendingDamage[enemy.id];
         if (pending) {
             const viz = state.visualState[enemy.id];
             if (viz) {
-                const pos = project3D(viz.x, viz.y, viz.z, cameraX, cameraY);
+                const pos = project3D(viz.x, viz.y, viz.z, state.camera.x, state.camera.y);
                 const size = THEME.ENEMY.SCALE_UI * pos.scale;
                 state.floatingTexts.push(new FloatingText(pos.x, pos.y - size - 40, `${pending.val}`, '#ff0000'));
                 
@@ -126,7 +92,7 @@ export const drawFrame = (ctx, width, height, dt, state) => {
         }
     });
 
-    // Process Pending Damage (Players)
+    // Spawn Pending Damage Text (Players)
     Object.values(state.players).forEach(player => {
         const pending = state.pendingDamage[player.id];
         if (pending) {
@@ -145,9 +111,81 @@ export const drawFrame = (ctx, width, height, dt, state) => {
         }
     });
 
-    // Update and Draw Texts
-    state.floatingTexts = state.floatingTexts.filter(ft => ft.life > 0);
-    if (state.floatingTexts.length > 20) state.floatingTexts = state.floatingTexts.slice(-20);
+    // Physics Update for Floating Texts
+    state.floatingTexts = state.floatingTexts.filter(ft => {
+        ft.update(); // Update velocity/life
+        return ft.life > 0;
+    });
     
+    // Safety cap
+    if (state.floatingTexts.length > 20) {
+        state.floatingTexts = state.floatingTexts.slice(-20);
+    }
+};
+
+/**
+ * PHASE 2: DRAW
+ * Pure rendering. No state mutations allowed.
+ */
+export const draw = (ctx, state, width, height) => {
+    // 1. Background Layers
+    drawBackground(ctx, width, height);
+    
+    // Pass pre-calculated camera from update phase
+    const { x: cameraX, y: cameraY } = state.camera;
+    const warpFactor = state.isWarping ? 10 : 1;
+
+    // Note: drawStars now only draws, since update() handled position changes
+    // We pass the particles array which was updated in the previous step
+    drawStars(ctx, state.particles, width, height, warpFactor, cameraX, cameraY);
+    
+    drawGrid(ctx, width, height, state.depth, state.gradientCache, state.time, cameraX, cameraY);
+
+    // 2. Entities
+    // Note: drawEnemies still does some 3D projection logic internally for hit detection
+    drawEnemies({
+        ctx, width, height,
+        enemies: state.enemies,
+        players: state.players,
+        visualStateRef: { current: state.visualState }, 
+        damageTimersRef: { current: state.damageTimers },
+        deathTimersRef: { current: state.deathTimers },
+        attackTimersRef: { current: state.attackTimers },
+        currentTarget: state.targetedEnemy,
+        time: state.time,
+        onHitZoneUpdate: (zones) => { state.hitZones = zones; },
+        playerPositions: state.currentPositions,
+        cameraX, cameraY
+    });
+
+    if (!state.isWarping) {
+        drawPlayers({
+            ctx, width, height,
+            players: state.players,
+            visualSeed: state.visualSeed,
+            time: state.time,
+            uiScale: state.uiScale,
+            playerPositions: state.currentPositions
+        });
+    }
+
+    // 3. UI Effects
+    const s = state.speech;
+    if (s.activeId && s.displayed) {
+        const viz = state.visualState[s.activeId];
+        if (viz) {
+            const idleOffset = Math.sin(state.time * THEME.ENEMY.IDLE_FREQ + viz.idlePhase) * THEME.ENEMY.IDLE_AMP;
+            const pos = project3D(viz.x, viz.y + idleOffset, viz.z, cameraX, cameraY);
+            const size = THEME.ENEMY.SCALE_UI * pos.scale;
+            drawSpeechBubble(ctx, pos.x, pos.y - size * 1.1, s.displayed);
+        }
+    }
+
     drawFloatingText(ctx, state.floatingTexts);
+};
+
+// Main Driver
+export const drawFrame = (ctx, width, height, dt, state) => {
+    update(state, dt, width, height);
+    draw(ctx, state, width, height);
 };

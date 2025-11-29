@@ -3,6 +3,17 @@ import { PATCHES } from './data/patches';
 import { assignSlot } from './mechanics/grid';
 import { calculateDamage, getActiveEntities, getNextId, triggerEvent } from './mechanics/combat';
 
+// --- OPTIMIZATION: LOG CAPPING ---
+const MAX_LOG_SIZE = 50;
+
+// Helper to prevent memory leak from infinite logs
+const addLog = (G, message) => {
+    G.log.push(message);
+    if (G.log.length > MAX_LOG_SIZE) {
+        G.log.shift();
+    }
+};
+
 // --- ENEMY TEMPLATES ---
 const ENEMY_TEMPLATES = [
     { typeId: 'glitch', name: 'Glitch', cost: 5, hp: 50, speed: 9 },
@@ -18,7 +29,9 @@ const generateEnemies = (depth, numHeroes) => {
 
     // --- BOSS LOGIC ---
     if (depth === 1 || depth % 10 === 0) {
-        const bossHp = Math.floor(500 * numHeroes * 0.8);
+        // Reduced multiplier from 500 to 250 to target ~6 rounds of combat
+        const bossHp = Math.floor(250 * numHeroes * 0.8);
+        
         let activeThreads = 1;
         if (numHeroes >= 3) activeThreads = 2;
         if (numHeroes >= 5) activeThreads = 3;
@@ -144,7 +157,7 @@ export const moves = {
         });
 
         G.phase = 'combat';
-        G.log.push('> NEURAL LINK ESTABLISHED');
+        addLog(G, '> NEURAL LINK ESTABLISHED');
         
         const numHeroes = Object.keys(G.players).length;
         G.enemies = generateEnemies(1, numHeroes);
@@ -160,7 +173,7 @@ export const moves = {
         if (fromPlayer && toPlayer && fromPlayer.bytes >= amount) {
             fromPlayer.bytes -= amount;
             toPlayer.bytes += amount;
-            G.log.push(`> TRANSFER: ${amount} BYTES ${fromPlayer.name} -> ${toPlayer.name}`);
+            addLog(G, `> TRANSFER: ${amount} BYTES ${fromPlayer.name} -> ${toPlayer.name}`);
         }
     },
 
@@ -170,7 +183,7 @@ export const moves = {
         if (idx > -1) {
             player.inventory.splice(idx, 1);
             player.bytes += 50; 
-            G.log.push(`> RECYCLED ${patchID} -> 50 BYTES`);
+            addLog(G, `> RECYCLED ${patchID} -> 50 BYTES`);
         }
     },
 
@@ -188,10 +201,10 @@ export const moves = {
                     if (patch.stats.hp) player.maxHp += patch.stats.hp;
                     if (patch.stats.speed) player.speed += patch.stats.speed;
                 }
-                G.log.push(`> INSTALLED ${patch.name} (PASSIVE)`);
+                addLog(G, `> INSTALLED ${patch.name} (PASSIVE)`);
             } else {
                 player.inventory.push(patchID);
-                G.log.push(`> ACQUIRED ${patch.name}`);
+                addLog(G, `> ACQUIRED ${patch.name}`);
             }
         }
     },
@@ -239,25 +252,25 @@ export const moves = {
         enemy.hp = Math.max(0, enemy.hp - dmg);
         enemy.lastCrit = isCrit;
 
-        G.log.push(`> ${player.name} [${patch.name}] :: ${dmg}${isCrit ? ' CRIT!' : ''} -> ${enemy.name}`);
+        addLog(G, `> ${player.name} [${patch.name}] :: ${dmg}${isCrit ? ' CRIT!' : ''} -> ${enemy.name}`);
         triggerEvent(G, 'PLAYER_ATTACK', { isCrit, targetId });
 
         if (patch.heal) {
             player.hp = Math.min(player.maxHp, player.hp + patch.heal);
-            G.log.push(`> REPAIRED ${patch.heal} HP`);
+            addLog(G, `> REPAIRED ${patch.heal} HP`);
         }
 
         if (enemy.hp === 0) {
-            G.log.push(`> ${enemy.name} TERMINATED`);
+            addLog(G, `> ${enemy.name} TERMINATED`);
             const droppedBytes = 20 + Math.floor(Math.random() * 30);
             player.bytes += droppedBytes;
-            G.log.push(`> ACQUIRED ${droppedBytes} BYTES`);
+            addLog(G, `> ACQUIRED ${droppedBytes} BYTES`);
             triggerEvent(G, 'ENEMY_DEATH', { targetId });
         }
 
         if (Object.values(G.enemies).every(e => e.hp <= 0)) {
             G.phase = 'victory';
-            G.log.push('> SECTOR CLEARED');
+            addLog(G, '> SECTOR CLEARED');
             triggerEvent(G, 'VICTORY');
         } else {
             G.activeEntity = getNextId(G, G.activeEntity);
@@ -268,7 +281,7 @@ export const moves = {
         const player = G.players[G.activeEntity];
         if (player) {
             player.isDefending = true;
-            G.log.push(`> ${player.name} :: SHIELDS UP`);
+            addLog(G, `> ${player.name} :: SHIELDS UP`);
             triggerEvent(G, 'PLAYER_DEFEND');
             G.activeEntity = getNextId(G, G.activeEntity);
         }
@@ -283,7 +296,7 @@ export const moves = {
         const target = livingPlayers[Math.floor(Math.random() * livingPlayers.length)];
         enemy.targetId = target.id;
         enemy.isCharging = true;
-        G.log.push(`> ${enemy.name} :: CHARGING WEAPONS...`);
+        addLog(G, `> ${enemy.name} :: CHARGING WEAPONS...`);
         triggerEvent(G, 'ENEMY_CHARGE');
     },
 
@@ -307,16 +320,16 @@ export const moves = {
                     const target = targets[Math.floor(Math.random() * targets.length)];
                     const dmg = calculateDamage(15, 25, false, target.isDefending);
                     target.hp = Math.max(0, target.hp - dmg);
-                    G.log.push(`> ${enemy.name} :: THREAD [1] ATTACK -> ${target.name} (${dmg})`);
-                    if (target.hp === 0) G.log.push(`> ${target.name} OFFLINE`);
+                    addLog(G, `> ${enemy.name} :: THREAD [1] ATTACK -> ${target.name} (${dmg})`);
+                    if (target.hp === 0) addLog(G, `> ${target.name} OFFLINE`);
                 } else if (i === 1) {
                     const target = targets[Math.floor(Math.random() * targets.length)];
                     const dmg = calculateDamage(10, 20, false, target.isDefending);
                     target.hp = Math.max(0, target.hp - dmg);
-                    G.log.push(`> ${enemy.name} :: THREAD [2] SECONDARY -> ${target.name} (${dmg})`);
-                    if (target.hp === 0) G.log.push(`> ${target.name} OFFLINE`);
+                    addLog(G, `> ${enemy.name} :: THREAD [2] SECONDARY -> ${target.name} (${dmg})`);
+                    if (target.hp === 0) addLog(G, `> ${target.name} OFFLINE`);
                 } else if (i === 2) {
-                    G.log.push(`> ${enemy.name} :: THREAD [3] SYSTEM WIDE SURGE`);
+                    addLog(G, `> ${enemy.name} :: THREAD [3] SYSTEM WIDE SURGE`);
                     targets.forEach(p => {
                         const aoeDmg = 10; 
                         p.hp = Math.max(0, p.hp - aoeDmg);
@@ -338,16 +351,16 @@ export const moves = {
                 const dmg = calculateDamage(5, 12, isCrit, target.isDefending);
                 if (target.isDefending) {
                     target.isDefending = false;
-                    G.log.push(`> ${target.name} :: BLOCKED`);
+                    addLog(G, `> ${target.name} :: BLOCKED`);
                     triggerEvent(G, 'BLOCK');
                 }
                 target.hp = Math.max(0, target.hp - dmg);
                 target.lastCrit = isCrit;
-                G.log.push(`> ${enemy.name} :: ${dmg}${isCrit ? ' CRIT!' : ''} DMG -> ${target.name}`);
+                addLog(G, `> ${enemy.name} :: ${dmg}${isCrit ? ' CRIT!' : ''} DMG -> ${target.name}`);
                 triggerEvent(G, 'ENEMY_ATTACK', { isCrit });
                 triggerEvent(G, 'PLAYER_DAMAGED');
                 if (target.hp === 0) {
-                    G.log.push(`> ${target.name} OFFLINE`);
+                    addLog(G, `> ${target.name} OFFLINE`);
                     triggerEvent(G, 'PLAYER_DEATH');
                 }
             }
@@ -377,7 +390,7 @@ export const moves = {
     nextRoom: ({ G }) => {
         if (G.depth > 0 && G.depth % 10 === 0 && G.phase !== 'merchant') {
             G.phase = 'merchant';
-            G.log.push('> ARRIVED AT MERCHANT NODE');
+            addLog(G, '> ARRIVED AT MERCHANT NODE');
             // Hardcoded shop stock until full RNG item generation
             G.shopStock = ['sys_bash', 'overclock_v1', 'hardened_kernel']; 
             return;
@@ -385,7 +398,7 @@ export const moves = {
 
         G.depth++;
         G.phase = 'combat';
-        G.log.push(`> WARPING TO SECTOR ${G.depth}...`);
+        addLog(G, `> WARPING TO SECTOR ${G.depth}...`);
         triggerEvent(G, 'WARP');
         
         Object.values(G.players).forEach(p => {

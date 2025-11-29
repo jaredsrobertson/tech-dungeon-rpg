@@ -1,12 +1,10 @@
 import React from 'react';
 import { CLASSES } from '../../game/data/classes'; 
 import { PlayerIcon } from '../components';
-import { audio } from '../../engine/audio/audio';
 
 export const LobbyView = ({ G, moves, playerID }) => {
   const canStart = Object.values(G.lobbyState).some(id => id !== null);
   
-  // Helpers to count
   const myHeroes = Object.values(G.lobbyState).filter(pid => String(pid) === String(playerID)).length;
   const availableHeroes = Object.values(G.lobbyState).filter(pid => pid === null).length;
 
@@ -20,7 +18,7 @@ export const LobbyView = ({ G, moves, playerID }) => {
 
   return (
     <div className="lobby-container">
-        <h1 className="logo-main" style={{ fontSize: '2.5rem', marginBottom: '2rem' }} data-text="SELECT PROTOCOLS">SELECT PROTOCOLS</h1>
+        <h1 className="lobby-title" data-text="SELECT PROTOCOLS">SELECT PROTOCOLS</h1>
         
         <div className="class-grid">
             {Object.keys(CLASSES).map(classID => {
@@ -51,29 +49,23 @@ export const LobbyView = ({ G, moves, playerID }) => {
                             </div>
                         </div>
                         <div className="class-actions">
-                            {!isClaimed && (
-                                <button className="btn-title btn-small">INITIALIZE</button>
-                            )}
-                            {isMine && (
-                                <button className="btn-title btn-small btn-danger">DISCONNECT</button>
-                            )}
-                            {isClaimed && !isMine && (
-                                <div className="locked-label">LOCKED // P{owner}</div>
-                            )}
+                            {!isClaimed && <button className="btn-title btn-small">INITIALIZE</button>}
+                            {isMine && <button className="btn-title btn-small btn-danger">DISCONNECT</button>}
+                            {isClaimed && !isMine && <div className="locked-label">LOCKED // P{owner}</div>}
                         </div>
                     </div>
                 );
             })}
         </div>
 
-        <div className="lobby-actions" style={{display: 'flex', gap: '20px', marginTop: '20px'}}>
+        <div className="lobby-actions">
             {availableHeroes > 0 && (
-                <button className="btn-title btn-small" onClick={() => { moves.claimAllHeroes(); }}>
+                <button className="btn-title btn-small" onClick={() => moves.claimAllHeroes()}>
                     SELECT ALL AVAILABLE
                 </button>
             )}
             {myHeroes > 0 && (
-                <button className="btn-title btn-small btn-danger" onClick={() => { moves.releaseAllHeroes(); }}>
+                <button className="btn-title btn-small btn-danger" onClick={() => moves.releaseAllHeroes()}>
                     DESELECT ALL
                 </button>
             )}
@@ -81,10 +73,9 @@ export const LobbyView = ({ G, moves, playerID }) => {
 
         <div className="lobby-footer">
             <button 
-                className="btn-title" 
+                className="btn-title jack-in-btn" 
                 disabled={!canStart} 
-                onClick={() => { moves.startRun(); }}
-                style={{ width: '300px', marginTop: '30px' }}
+                onClick={() => moves.startRun()}
             >
                 [ JACK IN ]
             </button>

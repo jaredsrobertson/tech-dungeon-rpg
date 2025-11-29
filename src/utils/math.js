@@ -1,16 +1,23 @@
-// math.js
+// src/utils/math.js
+
+// Pre-allocate a large buffer of vertex objects to reuse.
+// This prevents Garbage Collection pauses by avoiding new object creation during the render loop.
+// 2000 is sufficient for low-poly shapes (Cube=8 verts, Dodecahedron=20 verts).
+const CACHE_SIZE = 2000;
+const VERTEX_CACHE = new Array(CACHE_SIZE).fill(null).map(() => ({ x: 0, y: 0, z: 0 }));
 
 export const rotateVertices = (vertices, angleX, angleY, angleZ) => {
   const sinX = Math.sin(angleX), cosX = Math.cos(angleX);
   const sinY = Math.sin(angleY), cosY = Math.cos(angleY);
   const sinZ = Math.sin(angleZ), cosZ = Math.cos(angleZ);
 
-  // Create a fresh new array to hold the results
-  const result = new Array(vertices.length);
+  // We will populate and return this array. 
+  // Note: The array contains references to the persistent VERTEX_CACHE objects.
+  const result = []; 
 
   for (let i = 0; i < vertices.length; i++) {
     const v = vertices[i];
-    // Always clone the vertex coordinates to avoid mutation issues
+    // Handle input flexibility: supports both [x,y,z] arrays and {x,y,z} objects
     const x = v.x ?? v[0];
     const y = v.y ?? v[1];
     const z = v.z ?? v[2];
@@ -30,8 +37,18 @@ export const rotateVertices = (vertices, angleX, angleY, angleZ) => {
     const y3 = x2 * sinZ + y2 * cosZ;
     const z3 = z2;
 
-    // Return a new object for the rotated vertex
-    result[i] = { x: x3, y: y3, z: z3 };
+    // Safety check: Expand cache if we somehow have more vertices than expected
+    if (!VERTEX_CACHE[i]) {
+        VERTEX_CACHE[i] = { x: 0, y: 0, z: 0 };
+    }
+
+    // MUTATION: Update the existing object in the cache
+    const cachedVertex = VERTEX_CACHE[i];
+    cachedVertex.x = x3;
+    cachedVertex.y = y3;
+    cachedVertex.z = z3;
+
+    result.push(cachedVertex);
   }
   
   return result;
