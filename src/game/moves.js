@@ -3,10 +3,9 @@ import { PATCHES } from './data/patches';
 import { assignSlot } from './mechanics/grid';
 import { calculateDamage, getActiveEntities, getNextId, triggerEvent } from './mechanics/combat';
 
-// --- OPTIMIZATION: LOG CAPPING ---
+// --- HELPERS ---
 const MAX_LOG_SIZE = 50;
 
-// Helper to prevent memory leak from infinite logs
 const addLog = (G, message) => {
     G.log.push(message);
     if (G.log.length > MAX_LOG_SIZE) {
@@ -14,7 +13,48 @@ const addLog = (G, message) => {
     }
 };
 
-// --- ENEMY TEMPLATES ---
+// Reset/Init results for all active players
+const initEncounterResults = (G) => {
+    G.encounterResults = {};
+    Object.values(G.players).forEach(p => {
+        // Map by owner (playerID) or classID? 
+        // The game seems to use classID as the primary key in G.players
+        G.encounterResults[p.id] = { bytes: 0, items: [], accepted: false };
+    });
+};
+
+// Centralized Level Up Logic
+const advanceLevel = (G) => {
+    // Reset results for the new room
+    initEncounterResults(G);
+
+    // Merchant Check
+    if (G.depth > 0 && G.depth % 10 === 0 && G.phase !== 'merchant') {
+        G.phase = 'merchant';
+        addLog(G, '> ARRIVED AT MERCHANT NODE');
+        G.shopStock = ['sys_bash', 'overclock_v1', 'hardened_kernel']; 
+        return;
+    }
+
+    G.depth++;
+    G.phase = 'combat';
+    addLog(G, `> WARPING TO SECTOR ${G.depth}...`);
+    triggerEvent(G, 'WARP');
+    
+    // Heal Players slightly
+    Object.values(G.players).forEach(p => {
+        if (p.hp > 0) {
+            p.hp = Math.min(p.maxHp, p.hp + 20);
+            p.isDefending = false;
+        }
+    });
+    
+    const numHeroes = Object.keys(G.players).length;
+    G.enemies = generateEnemies(G.depth, numHeroes);
+    G.activeEntity = getActiveEntities(G)[0].id;
+};
+
+// ... [Keep ENEMY_TEMPLATES and generateEnemies as they are from previous turn] ...
 const ENEMY_TEMPLATES = [
     { typeId: 'glitch', name: 'Glitch', cost: 5, hp: 50, speed: 9 },
     { typeId: 'trojan', name: 'Trojan', cost: 10, hp: 140, speed: 4 },
@@ -27,41 +67,24 @@ const generateEnemies = (depth, numHeroes) => {
     const enemies = {};
     const placed = [];
 
-    // --- BOSS LOGIC ---
-    if (depth === 1 || depth % 10 === 0) {
-        // Reduced multiplier from 500 to 250 to target ~6 rounds of combat
-        const bossHp = Math.floor(250 * numHeroes * 0.8);
-        
-        let activeThreads = 1;
-        if (numHeroes >= 3) activeThreads = 2;
-        if (numHeroes >= 5) activeThreads = 3;
-
-        enemies['boss'] = {
-            id: 'boss',
-            type: 'boss',
-            name: `SYSTEM_DAEMON_v${depth}.0`,
-            hp: bossHp,
-            maxHp: bossHp,
-            speed: 5,
-            isCharging: false,
-            activeThreads: activeThreads,
-            targetId: null,
-            x: 0, y: 0, distance: 2500,
-            gridSlot: { col: 0, row: 0 }
-        };
-        return enemies;
-    }
-
-    // --- THREAT BUDGET SYSTEM ---
-    let budget = (numHeroes * 10) + (depth * 2);
-    const hpMultiplier = 1 + (numHeroes * 0.1);
+    let budget = (numHeroes * 8) + (depth * 1.5);
+    const MAX_ENEMIES = 5;
     let count = 0;
 
-    while (budget >= 3) {
+    while (budget >= 3 && count < MAX_ENEMIES) {
         const affordable = ENEMY_TEMPLATES.filter(t => t.cost <= budget);
         if (affordable.length === 0) break;
-        const template = affordable[Math.floor(Math.random() * affordable.length)];
+
+        affordable.sort((a, b) => b.cost - a.cost);
+        const slotsLeft = MAX_ENEMIES - count;
+        const avgBudgetPerSlot = budget / slotsLeft;
+        let candidates = affordable.filter(t => t.cost >= Math.min(avgBudgetPerSlot * 0.5, affordable[0].cost));
+        if (candidates.length === 0) candidates = affordable;
+
+        const template = candidates[Math.floor(Math.random() * candidates.length)];
         budget -= template.cost;
+        
+        const hpMultiplier = 1 + (numHeroes * 0.1) + (depth * 0.05);
         const maxHp = Math.floor(template.hp * hpMultiplier);
         
         const id = `e_${count}_${template.typeId}`;
@@ -83,6 +106,30 @@ const generateEnemies = (depth, numHeroes) => {
         placed.push(enemy);
         count++;
     }
+
+    if (depth > 0 && depth % 10 === 0) {
+        const bossHp = Math.floor(160 * numHeroes);
+        let activeThreads = 1;
+        if (numHeroes >= 3) activeThreads = 2;
+        if (numHeroes >= 5) activeThreads = 3;
+
+        return {
+            'boss': {
+                id: 'boss',
+                type: 'boss',
+                name: `SYSTEM_DAEMON_v${depth}.0`,
+                hp: bossHp,
+                maxHp: bossHp,
+                speed: 5,
+                isCharging: false,
+                activeThreads: activeThreads,
+                targetId: null,
+                x: 0, y: 0, distance: 2500,
+                gridSlot: { col: 0, row: 0 }
+            }
+        };
+    }
+
     return enemies;
 };
 
@@ -94,6 +141,8 @@ const INITIAL_ABILITIES = {
     av: 'quarantine',
     daemon: 'background_process'
 };
+
+const LOOT_TABLE = ['sys_bash', 'force_quit', 'background_process', 'packet_filter'];
 
 export const moves = {
     claimHero: ({ G, ctx }, classID) => {
@@ -128,6 +177,7 @@ export const moves = {
         claimed.forEach(([classID, pid]) => {
             const def = CLASSES[classID];
             let baseSpeed = 10;
+            // ... (Simple speed logic from previous file)
             if (def.role === 'Rogue') baseSpeed = 14;
             if (def.role === 'Tank') baseSpeed = 5;
             if (def.role === 'DPS') baseSpeed = 12;
@@ -156,6 +206,9 @@ export const moves = {
             };
         });
 
+        // INIT RESULTS TRACKER
+        initEncounterResults(G);
+
         G.phase = 'combat';
         addLog(G, '> NEURAL LINK ESTABLISHED');
         
@@ -164,6 +217,30 @@ export const moves = {
         
         const order = getActiveEntities(G);
         if (order.length > 0) G.activeEntity = order[0].id;
+    },
+
+    // --- NEW: LOOT ACCEPTANCE ---
+    acceptLoot: ({ G, ctx }) => {
+        // Find the player entity owned by this client
+        const playerKey = Object.keys(G.players).find(key => G.players[key].owner === String(ctx.playerID));
+        
+        // In local multiplayer (debug), just approve all or the current active one
+        // For production, we use the playerKey found above.
+        // Fallback for single-player testing where ID might be "0"
+        
+        if (playerKey && G.encounterResults[playerKey]) {
+            G.encounterResults[playerKey].accepted = true;
+        } else {
+            // Fallback: If we can't map ID (e.g. testing), mark ALL as accepted to unblock
+            Object.values(G.encounterResults).forEach(r => r.accepted = true);
+        }
+
+        // Check if ALL active players have accepted
+        const allReady = Object.values(G.encounterResults).every(r => r.accepted);
+        
+        if (allReady) {
+            advanceLevel(G);
+        }
     },
 
     // --- ECONOMY & SHOP ---
@@ -187,7 +264,6 @@ export const moves = {
         }
     },
 
-    // UPDATED: Handles Auto-Install for Passives
     buyPatch: ({ G }, patchID, cost) => {
         const player = G.players[G.activeEntity];
         if (player.bytes >= cost) {
@@ -196,7 +272,6 @@ export const moves = {
             
             if (patch.type === 'passive') {
                 player.passives.push(patchID);
-                // Apply Stats Immediately
                 if (patch.stats) {
                     if (patch.stats.hp) player.maxHp += patch.stats.hp;
                     if (patch.stats.speed) player.speed += patch.stats.speed;
@@ -209,7 +284,6 @@ export const moves = {
         }
     },
 
-    // --- MANAGEMENT ---
     equipAbility: ({ G }, patchID, slotIndex) => {
         const player = G.players[G.activeEntity];
         if (!player || slotIndex >= player.activeSlots) return;
@@ -262,9 +336,32 @@ export const moves = {
 
         if (enemy.hp === 0) {
             addLog(G, `> ${enemy.name} TERMINATED`);
+            
+            // --- LOOT LOGIC ---
             const droppedBytes = 20 + Math.floor(Math.random() * 30);
+            
+            // 1. Give Bytes
             player.bytes += droppedBytes;
             addLog(G, `> ACQUIRED ${droppedBytes} BYTES`);
+            
+            // 2. Track Bytes for Summary
+            if (!G.encounterResults) initEncounterResults(G);
+            if (G.encounterResults[player.id]) {
+                G.encounterResults[player.id].bytes += droppedBytes;
+            }
+
+            // 3. Roll for Item Drop (25% chance)
+            if (Math.random() < 0.25) {
+                const dropItem = LOOT_TABLE[Math.floor(Math.random() * LOOT_TABLE.length)];
+                player.inventory.push(dropItem);
+                
+                // Track Item for Summary
+                if (G.encounterResults[player.id]) {
+                    G.encounterResults[player.id].items.push(dropItem);
+                }
+                addLog(G, `> DROPPED: ${PATCHES[dropItem].name}`);
+            }
+
             triggerEvent(G, 'ENEMY_DEATH', { targetId });
         }
 
@@ -388,28 +485,7 @@ export const moves = {
     },
 
     nextRoom: ({ G }) => {
-        if (G.depth > 0 && G.depth % 10 === 0 && G.phase !== 'merchant') {
-            G.phase = 'merchant';
-            addLog(G, '> ARRIVED AT MERCHANT NODE');
-            // Hardcoded shop stock until full RNG item generation
-            G.shopStock = ['sys_bash', 'overclock_v1', 'hardened_kernel']; 
-            return;
-        }
-
-        G.depth++;
-        G.phase = 'combat';
-        addLog(G, `> WARPING TO SECTOR ${G.depth}...`);
-        triggerEvent(G, 'WARP');
-        
-        Object.values(G.players).forEach(p => {
-            if (p.hp > 0) {
-                p.hp = Math.min(p.maxHp, p.hp + 20);
-                p.isDefending = false;
-            }
-        });
-        
-        const numHeroes = Object.keys(G.players).length;
-        G.enemies = generateEnemies(G.depth, numHeroes);
-        G.activeEntity = getActiveEntities(G)[0].id;
+        // Keeps nextRoom logic for the Merchant view manual exit
+        advanceLevel(G);
     }
 };

@@ -1,8 +1,9 @@
+// src/ui/Board.jsx
 import React, { useState } from 'react';
 import { audio } from '../engine/audio/audio';
 import { LobbyView } from './menus/LobbyView';
 import { CombatView } from './views/CombatView';
-import { TitleBackground } from './menus/TitleBackground'; // Import the new component
+import { TitleBackground } from './menus/TitleBackground';
 
 export function KernelBoard({ G, moves, playerID }) {
   const [gameStarted, setGameStarted] = useState(false);
@@ -57,5 +58,5 @@ export function KernelBoard({ G, moves, playerID }) {
       return <LobbyView G={G} moves={moves} playerID={playerID} />;
   }
 
-  return <CombatView G={G} moves={moves} />;
+  return <CombatView G={G} moves={moves} playerID={playerID} />;
 }

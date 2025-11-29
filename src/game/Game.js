@@ -17,10 +17,12 @@ export const KernelPanic = {
         activeEntity: null,
         phase: 'lobby',
         depth: 1,
-        shopStock: [], // NEW
+        shopStock: [],
         log: ['> SYSTEM BOOT', '> AWAITING PROTOCOL SELECTION...'],
         eventCount: 0,
-        lastEvent: null
+        lastEvent: null,
+        // NEW: Track encounter rewards and ready status per player
+        encounterResults: {} 
     };
   },
 

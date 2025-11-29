@@ -1,3 +1,4 @@
+// src/ui/views/CombatView.jsx
 import React, { useEffect, useState, useRef } from 'react';
 import { generateGlitchText } from '../../game/constants';
 import { useFluidLayout } from '../../hooks/useFluidLayout';
@@ -6,15 +7,73 @@ import { TunnelRenderer } from '../../engine/renderer/renderer';
 import { HUD } from '../hud/HUD';
 import { SoftwareManager } from '../menus/SoftwareManager';
 import { MerchantView } from '../menus/MerchantView';
+import { PATCHES } from '../../game/data/patches';
 
-export const CombatView = ({ G, moves }) => {
+// --- LOOT MODAL COMPONENT (Cleaned) ---
+const LootModal = ({ G, playerID, onAccept }) => {
+    // Find player by owner ID (Client ID)
+    const myPlayerKey = Object.keys(G.players).find(k => G.players[k].owner === String(playerID));
+    const result = G.encounterResults ? G.encounterResults[myPlayerKey] : null;
+    const isAccepted = result ? result.accepted : false;
+
+    const totalPlayers = Object.keys(G.players).length;
+    const acceptedCount = G.encounterResults ? Object.values(G.encounterResults).filter(r => r.accepted).length : 0;
+
+    return (
+        <div className="modal-overlay">
+            <div className="loot-modal">
+                <h1 className="loot-title">SECTOR CLEARED</h1>
+                
+                {result ? (
+                    <div className="loot-content">
+                        <h3 className="loot-header">
+                            REWARDS // {G.players[myPlayerKey]?.name}
+                        </h3>
+                        
+                        <div className="loot-row">
+                            <span className="loot-label">Bytes:</span>
+                            <span className="loot-value">+{result.bytes}</span>
+                        </div>
+
+                        {result.items.length > 0 ? (
+                            <div>
+                                <div className="loot-section-title">PATCHES FOUND:</div>
+                                {result.items.map((itemId, i) => (
+                                    <div key={i} className="loot-item">
+                                        {PATCHES[itemId]?.name || itemId}
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="loot-empty">No software patches found.</div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="loot-empty">Retrieving flight data...</div>
+                )}
+
+                <div className="loot-actions">
+                    {!isAccepted ? (
+                        <button className="btn-title" onClick={onAccept}>
+                            ACCEPT LOOT
+                        </button>
+                    ) : (
+                        <button className="btn-title" disabled style={{borderColor: '#555', color: '#555'}}>
+                            WAITING FOR SQUAD ({acceptedCount}/{totalPlayers})
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export const CombatView = ({ G, moves, playerID }) => {
   const [selectedAbility, setSelectedAbility] = useState(null);
   const [hoveredEnemy, setHoveredEnemy] = useState(null);
   const [isWarping, setIsWarping] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [visualSeed, setVisualSeed] = useState(0);
-  
-  // NEW STATE FOR MANAGER
   const [managingPlayerId, setManagingPlayerId] = useState(null);
   
   const [speechQueue, setSpeechQueue] = useState([]);
@@ -68,7 +127,6 @@ export const CombatView = ({ G, moves }) => {
      }
   }, [speakingId, speechQueue, G.enemies]);
 
-  // --- KEYBOARD SHORTCUTS ---
   useEffect(() => {
     const onKey = (e) => {
         if (isWarping || speakingId) return;
@@ -77,7 +135,6 @@ export const CombatView = ({ G, moves }) => {
         const activePlayer = G.players[G.activeEntity];
         const isPlayerTurn = activePlayer && G.activeEntity && !G.activeEntity.startsWith('e') && G.activeEntity !== 'boss';
 
-        // 1. Global Toggles
         if (key === 'escape') { 
             if (managingPlayerId) setManagingPlayerId(null);
             else setMenuOpen(m => !m);
@@ -85,39 +142,23 @@ export const CombatView = ({ G, moves }) => {
             return;
         }
 
-        // 2. Victory / Navigation
-        if (G.phase === 'victory' && (key === ' ' || key === 'enter')) {
-            handleNextSector();
-            return;
-        }
-
-        // 3. Combat Controls (Only during Player Turn)
         if (!menuOpen && !managingPlayerId && isPlayerTurn) {
-            
-            // DEFEND
             if (key === 'd') { 
                 moves.defend(); 
                 setSelectedAbility(null);
             }
-
-            // ABILITIES (1, 2, 3)
             if (['1', '2', '3'].includes(key)) {
                 const slotIdx = parseInt(key) - 1;
                 const abilityID = activePlayer.loadout[slotIdx];
-                
                 if (abilityID) {
-                    // Smart Cast: If only 1 enemy or Boss exists, attack immediately
                     const livingEnemies = Object.values(G.enemies).filter(e => e.hp > 0);
                     if (livingEnemies.length === 1) {
                         moves.useAbility(livingEnemies[0].id, abilityID);
                     } else {
-                        // Otherwise enter targeting mode
                         setSelectedAbility(abilityID);
                     }
                 }
             }
-            
-            // CANCEL TARGETING
             if (key === 'backspace' || key === 'delete') {
                 setSelectedAbility(null);
             }
@@ -127,24 +168,6 @@ export const CombatView = ({ G, moves }) => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [isWarping, speakingId, menuOpen, managingPlayerId, G.activeEntity, G.phase, G.players, G.enemies]);
-
-  const handleNextSector = () => {
-      if (isWarping) return;
-      setIsWarping(true);
-      setTimeout(() => { 
-          moves.nextRoom(); 
-          setTimeout(() => {
-              // Only queue speech if it's a combat room (not merchant)
-              if (G.depth % 10 !== 0) {
-                  setSpeechQueue([
-                      { id: 'e1', text: generateGlitchText() }, 
-                      { id: 'e2', text: generateGlitchText() }
-                  ]);
-              }
-              setIsWarping(false);
-          }, 1000); 
-      }, 1500);
-  };
 
   const handleEnemyClick = (id) => {
       if (selectedAbility) {
@@ -166,7 +189,6 @@ export const CombatView = ({ G, moves }) => {
     <>
       <AudioSystem G={G} />
       
-      {/* RENDERER */}
       <TunnelRenderer 
         enemies={Object.values(G.enemies)} 
         players={G.players}
@@ -186,7 +208,6 @@ export const CombatView = ({ G, moves }) => {
         playerPositions={playerPositions} 
       />
 
-      {/* HUD (Pass onManage) */}
       <HUD 
         G={G} 
         moves={moves} 
@@ -203,12 +224,10 @@ export const CombatView = ({ G, moves }) => {
           </button>
       </div>
 
-      {/* MERCHANT OVERLAY */}
       {G.phase === 'merchant' && !isWarping && (
           <MerchantView G={G} moves={moves} />
       )}
 
-      {/* SOFTWARE MANAGER OVERLAY */}
       {managingPlayerId && (
           <SoftwareManager 
               G={G} 
@@ -218,7 +237,6 @@ export const CombatView = ({ G, moves }) => {
           />
       )}
 
-      {/* PAUSE MENU */}
       {menuOpen && (
         <div className="modal-overlay">
           <div className="pause-menu">
@@ -229,7 +247,6 @@ export const CombatView = ({ G, moves }) => {
         </div>
       )}
 
-      {/* GAME OVER / VICTORY MODALS */}
       {G.phase === 'defeat' && (
           <div className="modal-overlay">
               <div className="defeat-modal">
@@ -240,12 +257,11 @@ export const CombatView = ({ G, moves }) => {
       )}
 
       {G.phase === 'victory' && !isWarping && (
-          <div className="modal-overlay">
-              <div className="victory-modal">
-                  <h1 style={{fontSize:'4rem', color:'#00ff41', marginBottom:20}}>SECTOR CLEARED</h1>
-                  <button className="btn-title" onClick={handleNextSector}>PROCEED [SPACE]</button>
-              </div>
-          </div>
+          <LootModal 
+              G={G} 
+              playerID={playerID} 
+              onAccept={() => moves.acceptLoot()} 
+          />
       )}
     </>
   );
