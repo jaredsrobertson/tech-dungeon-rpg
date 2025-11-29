@@ -61,7 +61,7 @@ export const THEME = {
     SHAKE_X: 8,         
     DAMAGE_SHAKE: 20,   
     LASER_WIDTH: 4,
-    LASER_WIDTH_BOSS: 25, // ADDED: Massive beam width
+    LASER_WIDTH_BOSS: 25, 
     LASER_COLOR: 'rgba(255, 0, 0, 0.8)' 
   },
   UI: {
@@ -80,6 +80,12 @@ export const THEME = {
     DRIFT_AMP: 0.025,   
     DRIFT_FREQ_X: 0.3,  
     DRIFT_FREQ_Y: 0.2   
+  },
+  // --- NEW: MERCHANT THEME ---
+  MERCHANT: {
+    COLOR_GOLD: '#FFD700',
+    COLOR_BG: 'rgba(20, 20, 20, 0.95)',
+    FONT_TITLE: 'bold 2rem monospace'
   }
 };
 

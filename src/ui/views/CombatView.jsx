@@ -1,17 +1,21 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { generateGlitchText } from '../../game/constants';
 import { useFluidLayout } from '../../hooks/useFluidLayout';
 import { AudioSystem } from '../../engine/audio/AudioSystem';
-import { audio } from '../../engine/audio/audio';
 import { TunnelRenderer } from '../../engine/renderer/renderer';
 import { HUD } from '../hud/HUD';
+import { SoftwareManager } from '../menus/SoftwareManager';
+import { MerchantView } from '../menus/MerchantView';
 
 export const CombatView = ({ G, moves }) => {
-  const [attackMode, setAttackMode] = useState(false);
+  const [selectedAbility, setSelectedAbility] = useState(null);
   const [hoveredEnemy, setHoveredEnemy] = useState(null);
   const [isWarping, setIsWarping] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [visualSeed, setVisualSeed] = useState(0);
+  
+  // NEW STATE FOR MANAGER
+  const [managingPlayerId, setManagingPlayerId] = useState(null);
   
   const [speechQueue, setSpeechQueue] = useState([]);
   const [speakingId, setSpeakingId] = useState(null);
@@ -36,8 +40,6 @@ export const CombatView = ({ G, moves }) => {
   useEffect(() => {
       if (G.phase !== 'combat') return;
       
-      // FIXED: Check if the active entity exists in the enemies list (boss OR normal)
-      // This allows 'boss' ID to pass through
       if (G.activeEntity && G.enemies[G.activeEntity]) {
           const enemy = G.enemies[G.activeEntity];
           if (!enemy || enemy.hp <= 0) { moves.enemyAttack(G.activeEntity); return; }
@@ -45,15 +47,12 @@ export const CombatView = ({ G, moves }) => {
           if (!enemy.isCharging) { 
               moves.enemySelectTarget(G.activeEntity); 
           } else {
-              // CHANGED: Increased pause from 800ms to 2000ms for theatrical effect
-              // This gives the new "charging" sound and animation time to play out
               const timer = setTimeout(() => { moves.enemyAttack(G.activeEntity); }, 2000); 
               return () => clearTimeout(timer);
           }
       }
       
-      // Close attack menu if it's enemy turn
-      if (G.activeEntity && G.enemies[G.activeEntity]) setAttackMode(false);
+      if (G.activeEntity && G.enemies[G.activeEntity]) setSelectedAbility(null);
       
   }, [G.activeEntity, G.phase, G.enemies]);
 
@@ -75,34 +74,41 @@ export const CombatView = ({ G, moves }) => {
         const key = e.key.toLowerCase();
         
         if (key === 'escape') { 
-            setMenuOpen(m => !m); 
-            setAttackMode(false); 
-        } else if (!menuOpen && G.activeEntity && !G.activeEntity.startsWith('e') && G.activeEntity !== 'boss') {
-            if (key === 'a') { setAttackMode(m => !m); }
-            if (key === 'd') { moves.defend(); setAttackMode(false); }
-            if (attackMode && (key === '1' || key === '2')) {
-                const enemies = Object.values(G.enemies);
-                const target = enemies[parseInt(key)-1];
-                if (target && target.hp > 0) { moves.attack(target.id); setAttackMode(false); }
+            if (managingPlayerId) setManagingPlayerId(null);
+            else {
+                setMenuOpen(m => !m); 
+                setSelectedAbility(null); 
             }
+        } else if (!menuOpen && !managingPlayerId && G.activeEntity && !G.activeEntity.startsWith('e') && G.activeEntity !== 'boss') {
+            if (key === 'd') { moves.defend(); setSelectedAbility(null); }
         }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isWarping, speakingId, menuOpen, attackMode, G.activeEntity, G.enemies]);
+  }, [isWarping, speakingId, menuOpen, managingPlayerId, G.activeEntity]);
 
   const handleNextSector = () => {
       setIsWarping(true);
       setTimeout(() => { 
           moves.nextRoom(); 
           setTimeout(() => {
-              setSpeechQueue([
-                  { id: 'e1', text: generateGlitchText() }, 
-                  { id: 'e2', text: generateGlitchText() }
-              ]);
+              // Only queue speech if it's a combat room (not merchant)
+              if (G.depth % 10 !== 0) {
+                  setSpeechQueue([
+                      { id: 'e1', text: generateGlitchText() }, 
+                      { id: 'e2', text: generateGlitchText() }
+                  ]);
+              }
               setIsWarping(false);
           }, 1000); 
       }, 1500);
+  };
+
+  const handleEnemyClick = (id) => {
+      if (selectedAbility) {
+          moves.useAbility(id, selectedAbility);
+          setSelectedAbility(null);
+      }
   };
 
   if (isTooSmall) {
@@ -118,6 +124,7 @@ export const CombatView = ({ G, moves }) => {
     <>
       <AudioSystem G={G} />
       
+      {/* RENDERER */}
       <TunnelRenderer 
         enemies={Object.values(G.enemies)} 
         players={G.players}
@@ -129,21 +136,23 @@ export const CombatView = ({ G, moves }) => {
         speakingId={speakingId}
         speechText={currentSpeech}
         onSpeechEnd={() => { setSpeakingId(null); setSpeechQueue(q => q.slice(1)); }}
-        onEnemyClick={(id) => { if(attackMode) { moves.attack(id); setAttackMode(false); } }}
+        onEnemyClick={handleEnemyClick}
         onEnemyHover={setHoveredEnemy}
-        onBackgroundClick={() => setAttackMode(false)}
-        attackMode={attackMode}
+        onBackgroundClick={() => setSelectedAbility(null)}
+        attackMode={!!selectedAbility} 
         uiScale={uiScale}
         playerPositions={playerPositions} 
       />
 
+      {/* HUD (Pass onManage) */}
       <HUD 
         G={G} 
         moves={moves} 
         playerPositions={playerPositions} 
-        attackMode={attackMode} 
-        setAttackMode={setAttackMode} 
+        selectedAbility={selectedAbility} 
+        setSelectedAbility={setSelectedAbility} 
         isWarping={isWarping}
+        onManage={setManagingPlayerId} 
       />
 
       <div style={{position:'fixed', top:0, left:0, width:'100%', padding:'20px', display:'flex', justifyContent:'flex-end', zIndex:10000, pointerEvents:'none'}}>
@@ -152,6 +161,33 @@ export const CombatView = ({ G, moves }) => {
           </button>
       </div>
 
+      {/* MERCHANT OVERLAY */}
+      {G.phase === 'merchant' && !isWarping && (
+          <MerchantView G={G} moves={moves} />
+      )}
+
+      {/* SOFTWARE MANAGER OVERLAY */}
+      {managingPlayerId && (
+          <SoftwareManager 
+              G={G} 
+              moves={moves} 
+              playerID={managingPlayerId} 
+              onClose={() => setManagingPlayerId(null)} 
+          />
+      )}
+
+      {/* PAUSE MENU */}
+      {menuOpen && (
+        <div className="modal-overlay">
+          <div style={{width: 300, border: '2px solid #00ff41', background: '#000', padding: 20, textAlign: 'center'}}>
+            <h2 style={{color:'#00ff41', marginBottom: 20}}>PAUSED</h2>
+            <button className="btn-title" style={{width:'100%', marginBottom: 10}} onClick={() => setMenuOpen(false)}>RESUME</button>
+            <button className="btn-title" style={{width:'100%', borderColor:'red', color:'red'}} onClick={() => window.location.reload()}>REBOOT SYSTEM</button>
+          </div>
+        </div>
+      )}
+
+      {/* GAME OVER / VICTORY MODALS */}
       {G.phase === 'defeat' && (
           <div className="modal-overlay">
               <div style={{textAlign:'center', border: '2px solid #cc0044', padding: '40px', background: 'rgba(0,0,0,0.9)'}}>
@@ -168,16 +204,6 @@ export const CombatView = ({ G, moves }) => {
                   <button className="btn-title" onClick={handleNextSector}>PROCEED &gt;&gt;</button>
               </div>
           </div>
-      )}
-
-      {menuOpen && (
-        <div className="modal-overlay">
-          <div style={{width: 300, border: '2px solid #00ff41', background: '#000', padding: 20, textAlign: 'center'}}>
-            <h2 style={{color:'#00ff41', marginBottom: 20}}>PAUSED</h2>
-            <button className="btn-title" style={{width:'100%', marginBottom: 10}} onClick={() => setMenuOpen(false)}>RESUME</button>
-            <button className="btn-title" style={{width:'100%', borderColor:'red', color:'red'}} onClick={() => window.location.reload()}>REBOOT SYSTEM</button>
-          </div>
-        </div>
       )}
     </>
   );

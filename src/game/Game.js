@@ -17,6 +17,7 @@ export const KernelPanic = {
         activeEntity: null,
         phase: 'lobby',
         depth: 1,
+        shopStock: [], // NEW
         log: ['> SYSTEM BOOT', '> AWAITING PROTOCOL SELECTION...'],
         eventCount: 0,
         lastEvent: null
