@@ -3,22 +3,8 @@ import { CLASSES } from '../../../game/data/classes';
 import { rotateVertices } from '../../../utils/math';
 import { project3D, drawShapeFaces, lerp } from '../renderHelpers';
 
-// Helper to check which faces are facing the camera (back-face culling logic)
-const getVisibleFaces = (transformedVerts, faces) => {
-    return faces.filter(face => {
-        const v1 = transformedVerts[face.indices[0]];
-        const v2 = transformedVerts[face.indices[1]];
-        const v3 = transformedVerts[face.indices[2]];
-        
-        // Compute Normal Z component via Cross Product
-        const ax = v2.x - v1.x, ay = v2.y - v1.y;
-        const bx = v3.x - v1.x, by = v3.y - v1.y;
-        const nz = ax * by - ay * bx; // Z component of normal
-        
-        // If Z > 0, face is pointing towards camera
-        return nz > 0;
-    });
-};
+// PERFORMANCE FIX: Object Pool to stop Garbage Collection stutter
+const BOSS_PARTICLE_CACHE = Array.from({ length: 1000 }, (_, i) => ({ x: 0, y: 0, z: 0, i }));
 
 const updateVisualState = (enemy, visualStateRef, time) => {
     let viz = visualStateRef.current[enemy.id];
@@ -32,41 +18,34 @@ const updateVisualState = (enemy, visualStateRef, time) => {
     return viz;
 };
 
-// --- NEW BOSS RENDERER (CLOUD) ---
-// ADDED: isCharging, isFiring states
+// --- OPTIMIZED BOSS RENDERER ---
 const drawAsciiBoss = (ctx, enemy, pos, size, time, isTargeted, isDamaged, damageElapsed, isCharging, isFiring) => {
-    const { 
-        COLOR, CHAR_O, PARTICLE_COUNT, CLOUD_RADIUS, 
-        NOISE_SCALE, NOISE_SPEED, ROT_SPEED 
-    } = THEME.BOSS;
+    const { CHAR_O, CLOUD_RADIUS, NOISE_SCALE, NOISE_SPEED, ROT_SPEED } = THEME.BOSS;
+    const REDUCED_PARTICLE_COUNT = 300; // Cap particles for performance
 
     const toRad = (deg) => deg * Math.PI / 180;
     const phi = Math.PI * (3 - Math.sqrt(5)); 
 
-    const particles = [];
     const rotY = time * ROT_SPEED;
     const rotX = Math.sin(time * 0.5) * 0.2;
 
-    // --- COLOR LOGIC FOR ATTACK ---
-    // Default red
     let r = 255, g = 0, b = 0; 
-    
     if (isCharging) {
-        // Pulse white/red
         const pulse = Math.sin(time * 20) * 0.5 + 0.5;
-        g = 150 * pulse;
-        b = 150 * pulse;
+        g = 150 * pulse; b = 150 * pulse;
     }
-    if (isFiring) {
-        // Intense bright white/red mix
-        g = 200;
-        b = 200;
-    }
+    if (isFiring) { g = 200; b = 200; }
 
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-        // Safe spherical distribution
-        const yBase = 1 - (i / Math.max(1, PARTICLE_COUNT - 1)) * 2; 
-        const radiusAtY = Math.sqrt(Math.max(0, 1 - yBase * yBase)); // Safety clamp
+    // Use a temporary array for sorting references (cheap)
+    // DO NOT create new objects here
+    const activeParticles = [];
+
+    for (let i = 0; i < REDUCED_PARTICLE_COUNT; i++) {
+        // Reuse object from pool
+        const p = BOSS_PARTICLE_CACHE[i];
+        
+        const yBase = 1 - (i / Math.max(1, REDUCED_PARTICLE_COUNT - 1)) * 2; 
+        const radiusAtY = Math.sqrt(Math.max(0, 1 - yBase * yBase));
         const theta = phi * i;
         
         const xBase = Math.cos(theta) * radiusAtY;
@@ -79,38 +58,38 @@ const drawAsciiBoss = (ctx, enemy, pos, size, time, isTargeted, isDamaged, damag
         const y = yBase * radius;
         const z = zBase * radius;
 
-        // Manual Rotation
-        const x1 = x * Math.cos(rotY) - z * Math.sin(rotY);
+        // Mutate the cached object
+        p.x = x * Math.cos(rotY) - z * Math.sin(rotY);
         const z1 = x * Math.sin(rotY) + z * Math.cos(rotY);
-        const y2 = y * Math.cos(rotX) - z1 * Math.sin(rotX);
-        const z2 = y * Math.sin(rotX) + z1 * Math.cos(rotX);
-
-        particles.push({ x: x1, y: y2, z: z2, i });
+        p.y = y * Math.cos(rotX) - z1 * Math.sin(rotX);
+        p.z = y * Math.sin(rotX) + z1 * Math.cos(rotX);
+        
+        activeParticles.push(p);
     }
 
-    particles.sort((a, b) => b.z - a.z); 
+    activeParticles.sort((a, b) => b.z - a.z); 
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     
-    particles.forEach(p => {
-        // Safe projection using current pos scale
+    let currentFontSize = -1;
+
+    activeParticles.forEach(p => {
         const screenX = pos.x + p.x * pos.scale;
         const screenY = pos.y + p.y * pos.scale;
         
         const alpha = Math.max(0.1, Math.min(1, 1 - (p.z / CLOUD_RADIUS) * 0.5));
         
-        // Increase font size slightly to ensure visibility
-        const fontSize = Math.max(12, 30 * pos.scale * (1 - p.z/2000)); 
+        // Round font size to avoid thrashing browser font cache
+        const fontSize = Math.floor(Math.max(12, 30 * pos.scale * (1 - p.z/2000))); 
 
-        ctx.font = `bold ${fontSize}px monospace`;
-        
-        if (isDamaged) {
-            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-        } else {
-            // Apply dynamic attack color
-            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        if (fontSize !== currentFontSize) {
+            ctx.font = `bold ${fontSize}px monospace`;
+            currentFontSize = fontSize;
         }
+        
+        if (isDamaged) ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+        else ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
 
         const char = CHAR_O && CHAR_O.length > 0 ? CHAR_O[p.i % CHAR_O.length] : '0';
         ctx.fillText(char, screenX, screenY);
@@ -127,17 +106,19 @@ const drawAsciiBoss = (ctx, enemy, pos, size, time, isTargeted, isDamaged, damag
 };
 
 const drawCoreGlow = (ctx, x, y, size, color) => {
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, size * 0.6);
-    grad.addColorStop(0, '#ffffff'); // White hot center
-    grad.addColorStop(0.3, color);   // Player color
-    grad.addColorStop(1, 'rgba(0,0,0,0)');
-    
     ctx.save();
-    ctx.globalCompositeOperation = 'screen';
-    ctx.fillStyle = grad;
-    ctx.globalAlpha = 0.5;
+    // PERFORMANCE FIX: Replaced RadialGradient with solid circle + alpha
+    // Gradients per frame are expensive.
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.3;
     ctx.beginPath();
     ctx.arc(x, y, size * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.fillStyle = '#fff';
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.2, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 };
@@ -147,11 +128,10 @@ const drawDeathEffect = (ctx, enemy, deathTimersRef, visualStateRef, centerX, ce
     if (deathTimer && (now - deathTimer < 1000)) {
         const viz = visualStateRef.current[enemy.id] || enemy;
         const pos = project3D(viz.x || 0, viz.y || 0, viz.z || 300, centerX, centerY);
-        
         const size = 112.5 * pos.scale; 
         
         ctx.fillStyle = '#ff0000'; 
-        ctx.font = `bold ${size * 0.5}px monospace`;
+        ctx.font = `bold ${Math.floor(size * 0.5)}px monospace`;
         const seed = enemy.id.charCodeAt(0);
         
         for(let k=0; k<5; k++) {
@@ -183,7 +163,6 @@ const calculateCombatOffsets = (enemy, attackTimersRef, damageTimersRef, time, n
     return { offsetX: 0, offsetY: 0, offsetZ: 0, isDamaged, damageElapsed, isFiring, isCharging, attackTimer };
 };
 
-// ADDED: thickness parameter
 const drawLaser = (ctx, pos, attackTimer, width, height, players, playerPositions, thickness = 4) => {
     if (!attackTimer) return;
     const targetPos = playerPositions ? playerPositions[attackTimer.targetId] : null;
@@ -192,14 +171,27 @@ const drawLaser = (ctx, pos, attackTimer, width, height, players, playerPosition
     const playerX = targetPos.x;
     const playerY = height - THEME.PLAYER.BOTTOM_OFFSET; 
     
+    // PERFORMANCE FIX: Removed ShadowBlur (Gaussian Blur).
+    // Replaced with 2-pass drawing (Glow + Core).
+    ctx.save();
+    ctx.lineCap = 'round';
+    
     ctx.beginPath();
     ctx.moveTo(pos.x, pos.y);
     ctx.lineTo(playerX, playerY);
+
+    // 1. Glow (Wide transparent line)
     ctx.strokeStyle = THEME.COMBAT.LASER_COLOR; 
-    // Use thickness
-    ctx.lineWidth = thickness + Math.random() * 4;
-    ctx.shadowBlur = 20; ctx.shadowColor = '#ff0000';
-    ctx.stroke(); ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = thickness * 4; 
+    ctx.stroke();
+
+    // 2. Core (Thin solid line)
+    ctx.globalAlpha = 0.8;
+    ctx.lineWidth = thickness + Math.random() * 2;
+    ctx.stroke();
+    
+    ctx.restore();
 };
 
 const drawEnemyWireframe = (ctx, enemy, pos, size, wireframeSize, time, isTargeted, isDamaged, damageElapsed, isFiring, isCharging) => {
@@ -209,7 +201,6 @@ const drawEnemyWireframe = (ctx, enemy, pos, size, wireframeSize, time, isTarget
     let wireAlpha = 0.3;
     let coreVisible = true;
 
-    // 1. Color & State Logic
     if (isCharging) {
         const chargePulse = (Math.sin(time * 20) + 1) / 2; 
         mainColor = chargePulse > 0.5 ? '#ff0000' : '#ff0055';
@@ -231,7 +222,6 @@ const drawEnemyWireframe = (ctx, enemy, pos, size, wireframeSize, time, isTarget
         }
     }
 
-    // 2. Rotation & Projection
     const hpPct = enemy.hp / enemy.maxHp;
     const seed = enemy.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
     
@@ -253,60 +243,40 @@ const drawEnemyWireframe = (ctx, enemy, pos, size, wireframeSize, time, isTarget
         x: pos.x + v.x * wireframeSize, y: pos.y + v.y * wireframeSize 
     }));
     
-    // 3. Gradient Calculation (HP Fill)
-    let minY = Infinity, maxY = -Infinity;
-    projectedVerts.forEach(p => {
-        if (p.y < minY) minY = p.y;
-        if (p.y > maxY) maxY = p.y;
-    });
-    if (maxY - minY < 1) maxY = minY + 1;
+    // PERFORMANCE FIX: Replaced LinearGradient with Solid Color
+    const fillColor = mainColor;
 
-    // Gradient: Dark at top (empty), Main Color at bottom (full)
-    const split = 1 - hpPct; 
-    const hpGrad = ctx.createLinearGradient(0, minY, 0, maxY);
-    
-    // "Empty" part (Top)
-    hpGrad.addColorStop(0, '#220011'); 
-    hpGrad.addColorStop(Math.max(0, split - 0.05), '#220011');
-    // Transition
-    hpGrad.addColorStop(Math.min(1, split + 0.05), mainColor);
-    // "Filled" part (Bottom)
-    hpGrad.addColorStop(1, mainColor);
-
-    // 4. Draw Back Faces
     if (wireAlpha > 0) {
-        drawShapeFaces(ctx, projectedVerts, backFaces, hpGrad, wireAlpha * 0.3, mainColor); 
+        // Draw Back Faces
+        drawShapeFaces(ctx, projectedVerts, backFaces, '#220011', wireAlpha * 0.3, mainColor); 
     }
 
-    // 5. Draw Core
+    // Draw Core
     ctx.save();
     ctx.translate(pos.x, pos.y);
     
     if (isTargeted) {
         ctx.save(); ctx.rotate(time * 2); ctx.strokeStyle = '#00FFFF'; ctx.lineWidth = 2;
-        ctx.shadowBlur = 15; ctx.shadowColor = '#00FFFF';
+        // Removed ShadowBlur
         const r = wireframeSize * 0.8; 
         ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.stroke(); ctx.restore();
     }
 
     if (coreVisible) {
-        const pulse = 1.0 + Math.sin(time * 8) * 0.3;
-        const coreRadius = size * 0.6 * pulse;
+        const coreRadius = size * 0.6;
         const coreAlpha = 0.2 + (0.7 * hpPct);
-        const glowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, coreRadius);
-        glowGrad.addColorStop(0, `rgba(255,255,255,${coreAlpha})`); 
-        glowGrad.addColorStop(0.4, '#ff0055'); 
-        glowGrad.addColorStop(1, 'rgba(0,0,0,0)'); 
-        ctx.fillStyle = glowGrad; 
+        
+        // Solid Core
+        ctx.fillStyle = '#ff0055'; 
         ctx.globalAlpha = coreAlpha;
         ctx.beginPath(); ctx.arc(0, 0, coreRadius, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore(); 
 
-    // 6. Draw Front Faces
     if (wireAlpha > 0) {
-        drawShapeFaces(ctx, projectedVerts, frontFaces, hpGrad, wireAlpha * 0.5, mainColor);
+        // Draw Front Faces
+        drawShapeFaces(ctx, projectedVerts, frontFaces, fillColor, wireAlpha * 0.5, mainColor);
     }
 };
 
@@ -351,9 +321,9 @@ export const drawEnemies = ({
   enemies, players, 
   visualStateRef, damageTimersRef, deathTimersRef, attackTimersRef,
   currentTarget, time, onHitZoneUpdate, playerPositions,
-  cameraX, cameraY // Use passed camera coords
+  cameraX, cameraY 
 }) => {
-  const centerX = cameraX; // Use drift camera
+  const centerX = cameraX; 
   const centerY = cameraY;
   const now = performance.now();
   const nextHitZones = {};
@@ -368,35 +338,22 @@ export const drawEnemies = ({
     
     const { offsetX, offsetY, offsetZ, isDamaged, damageElapsed, isFiring, isCharging, attackTimer } = calculateCombatOffsets(enemy, attackTimersRef, damageTimersRef, time, now);
     
-    // Position Projection
     const idleOffset = Math.sin(time * THEME.ENEMY.IDLE_FREQ + viz.idlePhase) * THEME.ENEMY.IDLE_AMP; 
     const pos = project3D(viz.x + offsetX, viz.y + idleOffset + offsetY, viz.z + offsetZ, centerX, centerY);
     const uiSize = THEME.ENEMY.SCALE_UI * pos.scale; 
     const isTargeted = currentTarget === enemy.id;
 
-    // --- RENDER BRANCH ---
     if (enemy.type === 'boss') {
-        // Larger hitzone for boss
-        nextHitZones[enemy.id] = { x: pos.x, y: pos.y, r: 150 }; // Fixed large hitzone
-        
-        // ADDED: Pass charging/firing state
+        nextHitZones[enemy.id] = { x: pos.x, y: pos.y, r: 150 }; 
         drawAsciiBoss(ctx, enemy, pos, uiSize, time, isTargeted, isDamaged, damageElapsed, isCharging, isFiring);
-        
-        if (isTargeted) {
-            drawEnemyTooltip(ctx, enemy, { x: pos.x, y: pos.y + 180 }, 30); 
-        }
-
+        if (isTargeted) drawEnemyTooltip(ctx, enemy, { x: pos.x, y: pos.y + 180 }, 30); 
     } else {
-        // Normal Enemies
         const wireframeSize = uiSize * THEME.ENEMY.SCALE_WIRE; 
         nextHitZones[enemy.id] = { x: pos.x, y: pos.y, r: wireframeSize * THEME.ENEMY.HIT_RADIUS }; 
-        
         drawEnemyWireframe(ctx, enemy, pos, uiSize, wireframeSize, time, isTargeted, isDamaged, damageElapsed, isFiring, isCharging);
         if (isTargeted) drawEnemyTooltip(ctx, enemy, pos, uiSize);
     }
     
-    // Laser Draw (Shared)
-    // ADDED: Select Laser Width
     const beamWidth = (enemy.type === 'boss') ? THEME.COMBAT.LASER_WIDTH_BOSS : THEME.COMBAT.LASER_WIDTH;
     if (isFiring) drawLaser(ctx, pos, attackTimer, width, height, players, playerPositions, beamWidth);
   });
@@ -450,7 +407,15 @@ export const drawPlayers = ({ ctx, width, height, players, visualSeed, time, uiS
         const sRotY = sMag * (random(103, totalSeed) > 0.5 ? 1 : -1); 
         const sRotZ = sMag * (random(107, totalSeed) > 0.5 ? 1 : -1); 
 
-        drawCoreGlow(ctx, finalX, avatarY + floatY, currentBaseSize, mainColor);
+        // PERFORMANCE FIX: Solid core instead of RadialGradient
+        ctx.save();
+        ctx.fillStyle = mainColor;
+        ctx.globalAlpha = 0.3;
+        ctx.beginPath(); ctx.arc(finalX, avatarY + floatY, currentBaseSize * 0.5, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(finalX, avatarY + floatY, currentBaseSize * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
 
         const renderShape = (vertices, faces, sx, sy, sz, scale, color, isSecondary, strokeColor) => {
             const angleX = time * ROTATION_SPEED * sx; 

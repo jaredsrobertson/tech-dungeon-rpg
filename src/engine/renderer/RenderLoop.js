@@ -4,30 +4,34 @@ import { project3D, lerp } from './renderHelpers';
 import { drawBackground, drawStars } from './layers/BackgroundLayer';
 import { drawGrid } from './layers/EnvironmentLayer';
 import { drawEnemies, drawPlayers } from './layers/EntityLayer';
-import { drawFloatingText, drawSpeechBubble } from './layers/EffectLayer';
+import { drawFloatingText, drawSpeechBubble, drawFPS } from './layers/EffectLayer';
 
-/**
- * PHASE 1: UPDATE
- * Handles all logic, physics, timers, and data mutations.
- * No Context (ctx) calls allowed here.
- */
+// OPTIMIZATION: Object Pool for damage numbers
+// Pre-allocate 50 text objects. We will recycle these.
+const TEXT_POOL = Array.from({ length: 50 }, () => new FloatingText());
+
+const spawnFloatingText = (x, y, text, color) => {
+    // Find first inactive text in pool
+    const ft = TEXT_POOL.find(t => !t.active);
+    if (ft) {
+        ft.spawn(x, y, text, color);
+    }
+    // If pool is full, we just skip drawing (better than lagging)
+};
+
 export const update = (state, dt, width, height) => {
-    // 1. Time & Warp
     const warpFactor = state.isWarping ? 10 : 1;
     const safeDt = Math.min(dt, 0.1);
     state.time += safeDt * 1.2 * warpFactor;
 
-    // 2. Camera Drift Calculation
     const driftX = Math.sin(state.time * THEME.ENV.DRIFT_FREQ_X) * width * THEME.ENV.DRIFT_AMP;
     const driftY = Math.cos(state.time * THEME.ENV.DRIFT_FREQ_Y) * height * THEME.ENV.DRIFT_AMP;
     
-    // Store camera in state for the draw phase
     state.camera = {
         x: (width / 2) + driftX,
         y: (height * 0.35) + driftY
     };
 
-    // 3. Lerp Visual Positions (Smooth transitions)
     const targets = state.playerPositions; 
     const current = state.currentPositions;
     const lerpFactor = 0.1;
@@ -41,18 +45,15 @@ export const update = (state, dt, width, height) => {
         }
     });
     
-    // Garbage Collect old positions
     Object.keys(current).forEach(id => {
         if (!targets[id]) delete current[id];
     });
 
-    // 4. Particle System Update
     if (state.particles.length === 0) {
         state.particles = Array.from({ length: NUM_PARTICLES }, () => new Particle(width, height));
     }
     state.particles.forEach(p => p.update(width, height, warpFactor));
 
-    // 5. Speech Logic
     const s = state.speech;
     if (s.activeId && state.enemies) {
         const now = performance.now();
@@ -69,10 +70,10 @@ export const update = (state, dt, width, height) => {
         } 
     }
 
-    // 6. Floating Text & Damage Numbers Logic
     const now = performance.now();
 
     // Spawn Pending Damage Text (Enemies)
+    // OPTIMIZATION: Use Pool instead of new FloatingText()
     state.enemies.forEach(enemy => {
         const pending = state.pendingDamage[enemy.id];
         if (pending) {
@@ -80,11 +81,12 @@ export const update = (state, dt, width, height) => {
             if (viz) {
                 const pos = project3D(viz.x, viz.y, viz.z, state.camera.x, state.camera.y);
                 const size = THEME.ENEMY.SCALE_UI * pos.scale;
-                state.floatingTexts.push(new FloatingText(pos.x, pos.y - size - 40, `${pending.val}`, '#ff0000'));
+                
+                spawnFloatingText(pos.x, pos.y - size - 40, `${pending.val}`, '#ff0000');
                 
                 const critKey = `${enemy.id}_${now}`;
                 if (enemy.lastCrit && !state.displayedCrits[critKey]) {
-                    state.floatingTexts.push(new FloatingText(pos.x, pos.y - size - 100, 'CRITICAL', '#ffff00'));
+                    spawnFloatingText(pos.x, pos.y - size - 100, 'CRITICAL', '#ffff00');
                     state.displayedCrits[critKey] = true;
                 }
             }
@@ -100,11 +102,11 @@ export const update = (state, dt, width, height) => {
             const screenX = posData ? posData.x : (width / 2);
             const screenY = height - THEME.PLAYER.BOTTOM_OFFSET;
             
-            state.floatingTexts.push(new FloatingText(screenX, screenY, `${pending.val}`, '#ff0000'));
+            spawnFloatingText(screenX, screenY, `${pending.val}`, '#ff0000');
             
             const critKey = `${player.id}_${now}`;
             if (player.lastCrit && !state.displayedCrits[critKey]) {
-                state.floatingTexts.push(new FloatingText(screenX, screenY - 60, 'CRITICAL', '#ffff00'));
+                spawnFloatingText(screenX, screenY - 60, 'CRITICAL', '#ffff00');
                 state.displayedCrits[critKey] = true;
             }
             delete state.pendingDamage[player.id];
@@ -112,37 +114,26 @@ export const update = (state, dt, width, height) => {
     });
 
     // Physics Update for Floating Texts
-    state.floatingTexts = state.floatingTexts.filter(ft => {
-        ft.update(); // Update velocity/life
-        return ft.life > 0;
-    });
-    
-    // Safety cap
-    if (state.floatingTexts.length > 20) {
-        state.floatingTexts = state.floatingTexts.slice(-20);
+    // We update the entire pool, but only active ones do math
+    TEXT_POOL.forEach(ft => ft.update());
+
+    // Update debug stats
+    if (state.perf) {
+        state.perf.particleCount = state.particles.length;
+        state.perf.textCount = TEXT_POOL.filter(t => t.active).length;
     }
 };
 
-/**
- * PHASE 2: DRAW
- * Pure rendering. No state mutations allowed.
- */
 export const draw = (ctx, state, width, height) => {
-    // 1. Background Layers
     drawBackground(ctx, width, height);
     
-    // Pass pre-calculated camera from update phase
     const { x: cameraX, y: cameraY } = state.camera;
     const warpFactor = state.isWarping ? 10 : 1;
 
-    // Note: drawStars now only draws, since update() handled position changes
-    // We pass the particles array which was updated in the previous step
     drawStars(ctx, state.particles, width, height, warpFactor, cameraX, cameraY);
     
     drawGrid(ctx, width, height, state.depth, state.gradientCache, state.time, cameraX, cameraY);
 
-    // 2. Entities
-    // Note: drawEnemies still does some 3D projection logic internally for hit detection
     drawEnemies({
         ctx, width, height,
         enemies: state.enemies,
@@ -169,7 +160,6 @@ export const draw = (ctx, state, width, height) => {
         });
     }
 
-    // 3. UI Effects
     const s = state.speech;
     if (s.activeId && s.displayed) {
         const viz = state.visualState[s.activeId];
@@ -181,10 +171,14 @@ export const draw = (ctx, state, width, height) => {
         }
     }
 
-    drawFloatingText(ctx, state.floatingTexts);
+    // Pass the entire pool to the drawer
+    drawFloatingText(ctx, TEXT_POOL);
+
+    if (state.perf) {
+        drawFPS(ctx, state.perf, width, height);
+    }
 };
 
-// Main Driver
 export const drawFrame = (ctx, width, height, dt, state) => {
     update(state, dt, width, height);
     draw(ctx, state, width, height);

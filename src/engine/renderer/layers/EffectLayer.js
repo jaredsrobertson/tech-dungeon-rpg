@@ -1,4 +1,3 @@
-// src/engine/renderer/layers/EffectLayer.js
 import { DIALOGUE_LENGTH } from '../../../game/constants';
 
 export const drawSpeechBubble = (ctx, x, y, text) => {
@@ -8,11 +7,8 @@ export const drawSpeechBubble = (ctx, x, y, text) => {
     
     ctx.font = font;
     
-    // Predetermined Width Calculation
-    // Estimate char width for 'monospace' (approx via '0')
     const charWidth = ctx.measureText('0').width;
     const boxWidth = (charWidth * DIALOGUE_LENGTH) + (padding * 2);
-    
     const boxHeight = fontSize + padding * 2 + 10;
 
     const boxX = x - boxWidth / 2;
@@ -22,7 +18,7 @@ export const drawSpeechBubble = (ctx, x, y, text) => {
     ctx.fillStyle = '#050505';
     ctx.strokeStyle = '#cc0044';
     ctx.lineWidth = 1;
-    ctx.shadowBlur = 0;
+    // PERFORMANCE FIX: Removed shadowBlur
     
     ctx.beginPath();
     ctx.rect(boxX, boxY, boxWidth, boxHeight);
@@ -42,13 +38,10 @@ export const drawSpeechBubble = (ctx, x, y, text) => {
     ctx.textBaseline = 'middle';
     ctx.fillText(text, x, boxY + boxHeight / 2);
     
-    // Red Typing Indicator (Cursor)
-    // We calculate position based on the currently displayed text
     const currentTextWidth = ctx.measureText(text).width;
     
     if (Math.floor(Date.now() / 500) % 2 === 0) {
         ctx.fillStyle = '#cc0044';
-        // Position cursor at the end of the current centered text
         const cx = x + (currentTextWidth / 2) + 5;
         ctx.fillRect(cx, boxY + padding + 2, 8, fontSize);
     }
@@ -58,12 +51,63 @@ export const drawSpeechBubble = (ctx, x, y, text) => {
 
 export const drawFloatingText = (ctx, texts) => {
   texts.forEach(ft => {
-    ft.update(); 
-    ctx.save(); ctx.globalAlpha = ft.life; 
+    // Note: Update logic is handled in RenderLoop.js via pool, not here
+    
+    ctx.save(); 
+    ctx.globalAlpha = ft.life; 
+    
     const scale = 1 + Math.sin((1 - ft.life) * 15) * 0.3; 
-    ctx.font = `bold ${60 * scale}px monospace`; ctx.textAlign = "center"; 
-    ctx.shadowColor = 'black'; ctx.shadowBlur = 10; ctx.lineWidth = 5; ctx.strokeStyle = '#000';
-    ctx.strokeText(ft.text, ft.x, ft.y); ctx.fillStyle = ft.color; ctx.fillText(ft.text, ft.x, ft.y); 
+    
+    // PERFORMANCE FIX: Round to integer to save Font Cache
+    const fontSize = Math.floor(60 * scale);
+    ctx.font = `bold ${fontSize}px monospace`; 
+    
+    ctx.textAlign = "center"; 
+    
+    // PERFORMANCE FIX: Retro shadow instead of strokeText
+    ctx.fillStyle = '#000'; 
+    ctx.fillText(ft.text, ft.x + 2, ft.y + 2); // Simple drop shadow
+    
+    ctx.fillStyle = ft.color; 
+    ctx.fillText(ft.text, ft.x, ft.y); 
     ctx.restore();
   });
+};
+
+export const drawFPS = (ctx, perf, width, height) => {
+    ctx.save();
+    
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, 140, 95);
+    ctx.strokeStyle = '#00ff41';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, 0, 140, 95);
+
+    ctx.fillStyle = '#00ff41'; 
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    
+    const x = 10;
+    let y = 10;
+    const lh = 15;
+
+    const fpsColor = perf.avgFps < 30 ? '#ff0000' : (perf.avgFps < 55 ? '#ffff00' : '#00ff41');
+    ctx.fillStyle = fpsColor;
+    ctx.fillText(`AVG FPS: ${perf.avgFps}`, x, y);
+    y += lh;
+    
+    ctx.fillStyle = perf.minFps < 20 ? '#ff0000' : '#888';
+    ctx.fillText(`1% LOW:  ${perf.minFps}`, x, y);
+    y += lh + 5;
+
+    ctx.fillStyle = '#0088aa';
+    ctx.fillText(`PARTICLES: ${perf.particleCount}`, x, y);
+    y += lh;
+    
+    ctx.fillStyle = perf.textCount > 10 ? '#ffff00' : '#0088aa';
+    ctx.fillText(`FLT TEXT : ${perf.textCount}`, x, y);
+    y += lh;
+
+    ctx.restore();
 };

@@ -12,7 +12,6 @@ export const drawGrid = (ctx, width, height, depth, gradientCache, time, cameraX
   ctx.globalAlpha = 1; 
   ctx.shadowBlur = 0;
   
-  // Use passed-in camera coords for "drift" effect
   const centerX = cameraX;
   const centerY = cameraY;
   
@@ -63,31 +62,19 @@ export const drawGrid = (ctx, width, height, depth, gradientCache, time, cameraX
   }
   
   // Draw Longitudinal Lines
+  // OPTIMIZED: Removed linear gradient. Using simple alpha fade based on depth would be complex here,
+  // so we just use a solid low-opacity line which looks "retro wireframe" anyway.
   const numLines = 3; 
   ctx.lineWidth = 2;
-  let gradIndex = 0; 
+  ctx.strokeStyle = 'rgba(0, 255, 65, 0.3)'; // Solid color instead of gradient
 
   const drawLongLine = (p2D) => {
        project3D(p2D.x, p2D.y, -GRID_SPACING, centerX, centerY, _p1);
        project3D(p2D.x, p2D.y, TUNNEL_DEPTH, centerX, centerY, _p2);
        
-       let grad = gradientCache[gradIndex];
-       if (!grad) {
-           // Gradient is relative to screen, might need update if camera moves significantly?
-           // Actually linear gradient coords are absolute. Since points move, we might need to recreate gradient if it looks weird.
-           // For now, static gradient is usually "good enough" for wireframes, or we can just recalc.
-           // Let's recalc to be safe since the tunnel physically moves on screen.
-           grad = ctx.createLinearGradient(_p1.x, _p1.y, _p2.x, _p2.y);
-           grad.addColorStop(0, 'rgba(0, 255, 65, 0.6)'); 
-           grad.addColorStop(1, 'rgba(0, 255, 65, 0)'); 
-           gradientCache[gradIndex] = grad;
-       }
-       
-       ctx.strokeStyle = grad;
        ctx.beginPath(); 
        ctx.moveTo(_p1.x, _p1.y); ctx.lineTo(_p2.x, _p2.y); 
        ctx.stroke();
-       gradIndex++; 
   };
   
   for (let i = 0; i <= numLines; i++) {

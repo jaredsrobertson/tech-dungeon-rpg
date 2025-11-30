@@ -14,15 +14,12 @@ export const DIALOGUE_LENGTH = 25;
 // --- THEME CONFIGURATION ---
 export const THEME = {
   PLAYER: {
-    // LAYOUT CONSTANTS
     CARD_HEIGHT_BASE: 120,   
     SIDE_PADDING: 30,        
     GAP: 10,                 
     FLEX_INACTIVE: 1,        
     FLEX_ACTIVE: 2.2,        
     MAX_INACTIVE_WIDTH: 220,
-    
-    // ANIMATION/SHAPE CONSTANTS
     WIDTH: 220,         
     BOTTOM_OFFSET: 250, 
     BASE_SIZE: 100,
@@ -48,7 +45,6 @@ export const THEME = {
   },
   BOSS: {
     COLOR: '#ff0000',
-    // Cloud Settings
     PARTICLE_COUNT: 700, 
     CLOUD_RADIUS: 1400,  
     NOISE_SCALE: 200,    
@@ -81,7 +77,6 @@ export const THEME = {
     DRIFT_FREQ_X: 0.3,  
     DRIFT_FREQ_Y: 0.2   
   },
-  // --- NEW: MERCHANT THEME ---
   MERCHANT: {
     COLOR_GOLD: '#FFD700',
     COLOR_BG: 'rgba(20, 20, 20, 0.95)',
@@ -159,7 +154,6 @@ Object.keys(SHAPES).forEach(k => {
     SHAPES[k].vertices = centerVertices(normalizeVertices(SHAPES[k].vertices));
 });
 
-// --- 2D ICON GENERATOR (SVG PATHS) ---
 export const get2DShapePoints = (type, cx, cy, r) => {
     const toRad = (deg) => deg * Math.PI / 180;
     
@@ -237,15 +231,34 @@ export class Particle {
   }
 }
 
+// OPTIMIZATION: Re-useable FloatingText for Object Pooling
 export class FloatingText {
-  constructor(x, y, text, color) {
-    this.x = x; this.y = y; this.text = text; this.color = color;
-    this.life = 1.0; this.vy = -5; 
+  constructor() {
+    this.active = false;
+    this.x = 0;
+    this.y = 0;
+    this.text = '';
+    this.color = '#fff';
+    this.life = 0;
+    this.vy = 0;
   }
+
+  // Initialize from pool
+  spawn(x, y, text, color) {
+    this.active = true;
+    this.x = x;
+    this.y = y;
+    this.text = text;
+    this.color = color;
+    this.life = 1.0;
+    this.vy = -3; // Slower float for better readability
+  }
+
   update() {
+    if (!this.active) return;
     this.y += this.vy;
-    this.life -= 0.03; 
-    if (this.life < 0) this.life = 0;
+    this.life -= 0.02; // Slower fade
+    if (this.life <= 0) this.active = false;
   }
 }
 
@@ -254,7 +267,6 @@ const NUMS = "0123456789 ";
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
 export const GLITCH_CHARS = CODE_SYMBOLS.repeat(4) + NUMS.repeat(2) + ALPHABET;
 
-// Generate fixed length random characters
 export const generateGlitchText = () => {
     let result = "";
     for (let i = 0; i < DIALOGUE_LENGTH; i++) {
